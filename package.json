@@ -1,0 +1,27 @@
+{
+  "name": "party-jukebox",
+  "version": "1.0.0",
+  "description": "A lightweight party jukebox that allows guests on a local network to search Spotify and add tracks to the host's playback queue",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  },
+  "keywords": [
+    "spotify",
+    "jukebox",
+    "party",
+    "music",
+    "queue"
+  ],
+  "author": "",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.3",
+    "express": "^5.1.0",
+    "express-rate-limit": "^8.2.1"
+  }
+}

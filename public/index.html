@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Party Jukebox</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      min-height: 100vh;
+      color: #fff;
+    }
+
+    .container {
+      max-width: 600px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+
+    header {
+      text-align: center;
+      padding: 20px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+      margin-bottom: 20px;
+    }
+
+    h1 {
+      font-size: 2rem;
+      margin-bottom: 5px;
+    }
+
+    h1 span {
+      color: #1DB954;
+    }
+
+    .subtitle {
+      color: rgba(255,255,255,0.6);
+      font-size: 0.9rem;
+    }
+
+    .status-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: rgba(255,255,255,0.05);
+      padding: 10px 15px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+    }
+
+    .status-indicator {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #ff4444;
+    }
+
+    .status-dot.connected {
+      background: #1DB954;
+    }
+
+    .login-btn, .logout-btn {
+      background: #1DB954;
+      color: #fff;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 20px;
+      cursor: pointer;
+      font-size: 0.9rem;
+      text-decoration: none;
+      display: inline-block;
+    }
+
+    .logout-btn {
+      background: rgba(255,255,255,0.1);
+    }
+
+    .login-btn:hover {
+      background: #1ed760;
+    }
+
+    .logout-btn:hover {
+      background: rgba(255,255,255,0.2);
+    }
+
+    .now-playing {
+      background: rgba(29, 185, 84, 0.1);
+      border: 1px solid rgba(29, 185, 84, 0.3);
+      border-radius: 12px;
+      padding: 15px;
+      margin-bottom: 20px;
+      display: none;
+    }
+
+    .now-playing.visible {
+      display: flex;
+      align-items: center;
+      gap: 15px;
+    }
+
+    .now-playing-art {
+      width: 60px;
+      height: 60px;
+      border-radius: 8px;
+      object-fit: cover;
+    }
+
+    .now-playing-info h3 {
+      font-size: 0.8rem;
+      color: rgba(255,255,255,0.6);
+      margin-bottom: 5px;
+    }
+
+    .now-playing-info .track-name {
+      font-weight: 600;
+      margin-bottom: 2px;
+    }
+
+    .now-playing-info .artist-name {
+      color: rgba(255,255,255,0.7);
+      font-size: 0.9rem;
+    }
+
+    .search-section {
+      margin-bottom: 20px;
+    }
+
+    .search-box {
+      display: flex;
+      gap: 10px;
+    }
+
+    .search-input {
+      flex: 1;
+      padding: 15px;
+      border-radius: 30px;
+      border: none;
+      background: rgba(255,255,255,0.1);
+      color: #fff;
+      font-size: 1rem;
+      outline: none;
+    }
+
+    .search-input::placeholder {
+      color: rgba(255,255,255,0.5);
+    }
+
+    .search-input:focus {
+      background: rgba(255,255,255,0.15);
+    }
+
+    .search-btn {
+      padding: 15px 25px;
+      border-radius: 30px;
+      border: none;
+      background: #1DB954;
+      color: #fff;
+      font-size: 1rem;
+      cursor: pointer;
+    }
+
+    .search-btn:hover {
+      background: #1ed760;
+    }
+
+    .search-btn:disabled {
+      background: rgba(255,255,255,0.2);
+      cursor: not-allowed;
+    }
+
+    .results {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .track-card {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      background: rgba(255,255,255,0.05);
+      padding: 12px;
+      border-radius: 12px;
+      transition: background 0.2s;
+    }
+
+    .track-card:hover {
+      background: rgba(255,255,255,0.1);
+    }
+
+    .track-art {
+      width: 56px;
+      height: 56px;
+      border-radius: 4px;
+      object-fit: cover;
+    }
+
+    .track-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .track-name {
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .track-artist {
+      color: rgba(255,255,255,0.7);
+      font-size: 0.9rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .track-album {
+      color: rgba(255,255,255,0.5);
+      font-size: 0.8rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .add-btn {
+      background: #1DB954;
+      color: #fff;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 20px;
+      cursor: pointer;
+      font-weight: 600;
+      white-space: nowrap;
+      transition: all 0.2s;
+    }
+
+    .add-btn:hover {
+      background: #1ed760;
+      transform: scale(1.05);
+    }
+
+    .add-btn:disabled {
+      background: rgba(255,255,255,0.2);
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .add-btn.added {
+      background: rgba(29, 185, 84, 0.3);
+    }
+
+    .message {
+      text-align: center;
+      padding: 40px 20px;
+      color: rgba(255,255,255,0.6);
+    }
+
+    .error-message {
+      background: rgba(255, 68, 68, 0.1);
+      border: 1px solid rgba(255, 68, 68, 0.3);
+      color: #ff6b6b;
+      padding: 15px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+      text-align: center;
+    }
+
+    .success-toast {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #1DB954;
+      color: #fff;
+      padding: 15px 25px;
+      border-radius: 30px;
+      font-weight: 600;
+      opacity: 0;
+      transition: opacity 0.3s;
+      z-index: 1000;
+    }
+
+    .success-toast.visible {
+      opacity: 1;
+    }
+
+    .host-section {
+      text-align: center;
+      padding: 60px 20px;
+    }
+
+    .host-section h2 {
+      margin-bottom: 10px;
+    }
+
+    .host-section p {
+      color: rgba(255,255,255,0.6);
+      margin-bottom: 30px;
+    }
+
+    .config-warning {
+      background: rgba(255, 193, 7, 0.1);
+      border: 1px solid rgba(255, 193, 7, 0.3);
+      color: #ffc107;
+      padding: 20px;
+      border-radius: 8px;
+      text-align: left;
+    }
+
+    .config-warning h3 {
+      margin-bottom: 10px;
+    }
+
+    .config-warning code {
+      background: rgba(0,0,0,0.3);
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+
+    @media (max-width: 480px) {
+      .search-box {
+        flex-direction: column;
+      }
+
+      .search-btn {
+        width: 100%;
+      }
+
+      .track-card {
+        flex-wrap: wrap;
+      }
+
+      .add-btn {
+        width: 100%;
+        margin-top: 10px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>🎵 Party <span>Jukebox</span></h1>
+      <p class="subtitle">Search and add songs to the queue</p>
+    </header>
+
+    <div class="status-bar">
+      <div class="status-indicator">
+        <div class="status-dot" id="statusDot"></div>
+        <span id="statusText">Checking...</span>
+      </div>
+      <div id="authActions"></div>
+    </div>
+
+    <div id="errorMessage" class="error-message" style="display: none;"></div>
+
+    <div id="configWarning" class="config-warning" style="display: none;">
+      <h3>⚠️ Configuration Required</h3>
+      <p>Spotify credentials are not configured. The host needs to:</p>
+      <ol style="margin-left: 20px; margin-top: 10px;">
+        <li>Create a Spotify app at <a href="https://developer.spotify.com/dashboard" target="_blank" style="color: #1DB954;">developer.spotify.com</a></li>
+        <li>Set environment variables: <code>SPOTIFY_CLIENT_ID</code> and <code>SPOTIFY_CLIENT_SECRET</code></li>
+        <li>Restart the server</li>
+      </ol>
+    </div>
+
+    <div id="hostSection" class="host-section" style="display: none;">
+      <h2>Welcome, Host!</h2>
+      <p>Connect your Spotify account to let guests add songs to your queue.</p>
+      <a href="/login" class="login-btn">Connect Spotify</a>
+    </div>
+
+    <div id="mainContent" style="display: none;">
+      <div id="nowPlaying" class="now-playing">
+        <img id="nowPlayingArt" class="now-playing-art" src="" alt="">
+        <div class="now-playing-info">
+          <h3>NOW PLAYING</h3>
+          <div id="nowPlayingTrack" class="track-name"></div>
+          <div id="nowPlayingArtist" class="artist-name"></div>
+        </div>
+      </div>
+
+      <div class="search-section">
+        <div class="search-box">
+          <input type="text" id="searchInput" class="search-input" placeholder="Search for a song..." autocomplete="off">
+          <button id="searchBtn" class="search-btn">Search</button>
+        </div>
+      </div>
+
+      <div id="results" class="results">
+        <div class="message">Search for songs to add to the queue</div>
+      </div>
+    </div>
+
+    <div id="toast" class="success-toast">Added to queue!</div>
+  </div>
+
+  <script>
+    // Elements
+    const statusDot = document.getElementById('statusDot');
+    const statusText = document.getElementById('statusText');
+    const authActions = document.getElementById('authActions');
+    const errorMessage = document.getElementById('errorMessage');
+    const configWarning = document.getElementById('configWarning');
+    const hostSection = document.getElementById('hostSection');
+    const mainContent = document.getElementById('mainContent');
+    const searchInput = document.getElementById('searchInput');
+    const searchBtn = document.getElementById('searchBtn');
+    const results = document.getElementById('results');
+    const nowPlaying = document.getElementById('nowPlaying');
+    const nowPlayingArt = document.getElementById('nowPlayingArt');
+    const nowPlayingTrack = document.getElementById('nowPlayingTrack');
+    const nowPlayingArtist = document.getElementById('nowPlayingArtist');
+    const toast = document.getElementById('toast');
+
+    // Check for URL parameters
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.has('error')) {
+      showError('Authentication failed: ' + urlParams.get('error'));
+      window.history.replaceState({}, document.title, '/');
+    }
+    if (urlParams.has('authenticated')) {
+      window.history.replaceState({}, document.title, '/');
+    }
+
+    // Check status on load
+    checkStatus();
+
+    // Event listeners
+    searchBtn.addEventListener('click', performSearch);
+    searchInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') performSearch();
+    });
+
+    async function checkStatus() {
+      try {
+        const response = await fetch('/api/status');
+        const data = await response.json();
+
+        if (!data.configured) {
+          configWarning.style.display = 'block';
+          statusDot.classList.remove('connected');
+          statusText.textContent = 'Not configured';
+          return;
+        }
+
+        if (data.authenticated) {
+          statusDot.classList.add('connected');
+          statusText.textContent = 'Connected';
+          authActions.innerHTML = '<button class="logout-btn" onclick="logout()">Disconnect</button>';
+          mainContent.style.display = 'block';
+          hostSection.style.display = 'none';
+          updateNowPlaying();
+          // Update now playing every 10 seconds
+          setInterval(updateNowPlaying, 10000);
+        } else {
+          statusDot.classList.remove('connected');
+          statusText.textContent = 'Not connected';
+          authActions.innerHTML = '<a href="/login" class="login-btn">Connect</a>';
+          hostSection.style.display = 'block';
+          mainContent.style.display = 'none';
+        }
+      } catch (err) {
+        showError('Failed to check status');
+      }
+    }
+
+    async function performSearch() {
+      const query = searchInput.value.trim();
+      if (!query) return;
+
+      searchBtn.disabled = true;
+      searchBtn.textContent = 'Searching...';
+      results.innerHTML = '<div class="message">Searching...</div>';
+
+      try {
+        const response = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data.error || 'Search failed');
+        }
+
+        if (data.tracks.length === 0) {
+          results.innerHTML = '<div class="message">No tracks found</div>';
+          return;
+        }
+
+        results.innerHTML = data.tracks.map(track => `
+          <div class="track-card">
+            <img class="track-art" src="${track.albumArt || 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect fill=%22%23333%22 width=%22100%22 height=%22100%22/><text x=%2250%22 y=%2255%22 text-anchor=%22middle%22 fill=%22%23666%22 font-size=%2240%22>♪</text></svg>'}" alt="${escapeHtml(track.album)}">
+            <div class="track-info">
+              <div class="track-name">${escapeHtml(track.name)}</div>
+              <div class="track-artist">${escapeHtml(track.artist)}</div>
+              <div class="track-album">${escapeHtml(track.album)}</div>
+            </div>
+            <button class="add-btn" onclick="addToQueue('${track.uri}', this)">Add</button>
+          </div>
+        `).join('');
+      } catch (err) {
+        results.innerHTML = `<div class="message">${escapeHtml(err.message)}</div>`;
+      } finally {
+        searchBtn.disabled = false;
+        searchBtn.textContent = 'Search';
+      }
+    }
+
+    async function addToQueue(uri, button) {
+      button.disabled = true;
+      button.textContent = 'Adding...';
+
+      try {
+        const response = await fetch('/api/queue', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ uri })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data.error || 'Failed to add to queue');
+        }
+
+        button.textContent = 'Added ✓';
+        button.classList.add('added');
+        showToast('Added to queue!');
+      } catch (err) {
+        button.textContent = 'Add';
+        button.disabled = false;
+        showError(err.message);
+      }
+    }
+
+    async function updateNowPlaying() {
+      try {
+        const response = await fetch('/api/playback');
+        const data = await response.json();
+
+        if (data.track) {
+          nowPlaying.classList.add('visible');
+          nowPlayingArt.src = data.track.albumArt || '';
+          nowPlayingTrack.textContent = data.track.name;
+          nowPlayingArtist.textContent = data.track.artist;
+        } else {
+          nowPlaying.classList.remove('visible');
+        }
+      } catch (err) {
+        // Silently fail
+      }
+    }
+
+    async function logout() {
+      try {
+        await fetch('/api/logout', { method: 'POST' });
+        window.location.reload();
+      } catch (err) {
+        showError('Failed to logout');
+      }
+    }
+
+    function showError(message) {
+      errorMessage.textContent = message;
+      errorMessage.style.display = 'block';
+      setTimeout(() => {
+        errorMessage.style.display = 'none';
+      }, 5000);
+    }
+
+    function showToast(message) {
+      toast.textContent = message;
+      toast.classList.add('visible');
+      setTimeout(() => {
+        toast.classList.remove('visible');
+      }, 2000);
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+  </script>
+</body>
+</html>
