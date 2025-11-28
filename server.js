@@ -2,9 +2,23 @@ require('dotenv').config();
 const express = require('express');
 const crypto = require('crypto');
 const path = require('path');
+const rateLimit = require('express-rate-limit');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Rate limiting configuration
+const generalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // limit each IP to 100 requests per windowMs
+  message: { error: 'Too many requests, please try again later.' }
+});
+
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10, // limit each IP to 10 auth attempts per windowMs
+  message: { error: 'Too many authentication attempts, please try again later.' }
+});
 
 // In-memory storage for tokens (in production, use a proper session store)
 let tokenData = {
@@ -20,6 +34,7 @@ const SPOTIFY_REDIRECT_URI = process.env.SPOTIFY_REDIRECT_URI || `http://localho
 
 // Middleware
 app.use(express.json());
+app.use(generalLimiter);
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Helper function to make Spotify API requests
@@ -106,7 +121,7 @@ app.get('/api/status', (req, res) => {
 });
 
 // Spotify OAuth login
-app.get('/login', (req, res) => {
+app.get('/login', authLimiter, (req, res) => {
   if (!SPOTIFY_CLIENT_ID || !SPOTIFY_CLIENT_SECRET) {
     return res.status(500).send('Spotify credentials not configured. Please set SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET environment variables.');
   }
