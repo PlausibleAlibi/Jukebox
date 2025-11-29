@@ -13,6 +13,7 @@ A lightweight web application that allows guests on your local network to search
 - **Queue Voting**: Users can upvote songs to influence play order
 - **Track Limits**: Prevent queue flooding with per-device track limits
 - **Host Admin Panel**: Skip tracks, pause/play, clear queue, and reset limits
+- **RFC 8252 Compliant OAuth**: Dynamic loopback port selection for desktop apps
 
 ## Quick Start
 
@@ -29,8 +30,10 @@ A lightweight web application that allows guests on your local network to search
 3. Fill in:
    - App name: "Party Jukebox" (or any name)
    - App description: Whatever you like
-   - Redirect URI: `http://localhost:3000/callback`
+   - Redirect URI: `http://127.0.0.1/callback` (for desktop/local use with dynamic ports)
 4. Save your **Client ID** and **Client Secret**
+
+> **Note**: For RFC 8252 compliant OAuth (recommended for desktop apps), Spotify requires the redirect URI to use the loopback IP literal (`127.0.0.1`) rather than `localhost`. The app will dynamically select an available port at runtime.
 
 ### 2. Configure Environment
 
@@ -77,18 +80,38 @@ ipconfig
 |----------|-------------|---------|
 | `SPOTIFY_CLIENT_ID` | Your Spotify app's Client ID | Required |
 | `SPOTIFY_CLIENT_SECRET` | Your Spotify app's Client Secret | Required |
-| `SPOTIFY_REDIRECT_URI` | OAuth callback URL | `http://localhost:3000/callback` |
+| `SPOTIFY_REDIRECT_URI` | OAuth callback URL (set only for server deployments) | Dynamic (RFC 8252) |
 | `PORT` | Server port | `3000` |
 | `MAX_TRACKS_PER_IP` | Maximum tracks a device can queue | `5` |
 | `ADMIN_PASSWORD` | Password for host admin controls | Empty (disabled) |
+
+### OAuth Configuration
+
+Party Jukebox supports two OAuth modes:
+
+#### 1. Dynamic Loopback Port (Default - RFC 8252 Compliant)
+
+When `SPOTIFY_REDIRECT_URI` is **not set**, the app uses RFC 8252 compliant OAuth:
+- A random available port is selected on `127.0.0.1` when the OAuth flow starts
+- The redirect URI is dynamically set to `http://127.0.0.1:{port}/callback`
+- This is the recommended mode for desktop/local deployments
+
+**Spotify App Configuration**: Add `http://127.0.0.1/callback` as a Redirect URI in your Spotify app settings. Spotify's OAuth server will accept any port on the loopback interface per RFC 8252.
+
+#### 2. Static Redirect URI (For Server Deployments)
+
+When `SPOTIFY_REDIRECT_URI` **is set**, the app uses a fixed redirect URI:
+- Set this for cloud/server deployments where you have a fixed callback URL
+- Example: `SPOTIFY_REDIRECT_URI=https://jukebox.example.com/callback`
 
 ### LAN Access Setup
 
 For guests to access the jukebox:
 
-1. Update your Spotify app's Redirect URI to use your local IP (e.g., `http://192.168.1.100:3000/callback`)
-2. Set `SPOTIFY_REDIRECT_URI` in your `.env` to match
-3. Ensure your firewall allows connections on the configured port
+1. Ensure your firewall allows connections on the configured port
+2. Share your local IP address with guests (e.g., `http://192.168.1.100:3000`)
+
+> **Note**: The OAuth callback always uses the loopback interface (`127.0.0.1`), so guests don't need to be able to reach the OAuth callback port - only the main app port.
 
 ## Party Features
 
@@ -238,6 +261,23 @@ sudo iptables -A INPUT -p tcp --dport 3000 -j DROP
 
 ### "No active device found"
 Make sure you have Spotify playing on a device. The API can only add to queue when there's an active playback session.
+
+### OAuth redirect_uri mismatch error
+This error occurs when the redirect URI used by the app doesn't match what's configured in your Spotify app settings.
+
+**For Dynamic Port Mode (default)**:
+- Ensure `http://127.0.0.1/callback` is added as a Redirect URI in your Spotify app settings
+- Do NOT include a port number - Spotify will accept any port per RFC 8252
+- Make sure `SPOTIFY_REDIRECT_URI` is NOT set in your `.env` file
+
+**For Static URI Mode**:
+- Ensure the exact URI (including port) matches in both your Spotify app and `.env` file
+- Example: If using `http://localhost:3000/callback`, it must match exactly in both places
+
+### OAuth callback server failed to start
+- Ensure no firewall is blocking outbound connections on random ports
+- Check that the loopback interface (127.0.0.1) is available
+- Try restarting the app
 
 ### Guests can't connect
 - Check your firewall allows connections on the port

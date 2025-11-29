@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const crypto = require('crypto');
 const path = require('path');
+const http = require('http');
 const rateLimit = require('express-rate-limit');
 const QRCode = require('qrcode');
 
@@ -44,7 +45,114 @@ let adminSessions = new Set();
 // Spotify configuration
 const SPOTIFY_CLIENT_ID = process.env.SPOTIFY_CLIENT_ID;
 const SPOTIFY_CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET;
-const SPOTIFY_REDIRECT_URI = process.env.SPOTIFY_REDIRECT_URI || `http://localhost:${PORT}/callback`;
+
+// OAuth loopback configuration (RFC 8252 compliant)
+// If SPOTIFY_REDIRECT_URI is set, use it (for server/cloud deployments)
+// Otherwise, use dynamic loopback port selection for desktop apps
+const USE_DYNAMIC_OAUTH_PORT = !process.env.SPOTIFY_REDIRECT_URI;
+let oauthCallbackServer = null;
+let oauthCallbackPort = null;
+let currentOAuthState = null;
+
+// Get the base URL for the main application server
+function getMainAppBaseUrl() {
+  return `http://127.0.0.1:${PORT}`;
+}
+
+// Get the OAuth redirect URI (dynamic for desktop, static for server deployments)
+function getSpotifyRedirectUri() {
+  if (!USE_DYNAMIC_OAUTH_PORT) {
+    return process.env.SPOTIFY_REDIRECT_URI;
+  }
+  if (oauthCallbackPort) {
+    return `http://127.0.0.1:${oauthCallbackPort}/callback`;
+  }
+  return null;
+}
+
+// Start the OAuth callback server on a random available port (RFC 8252)
+async function startOAuthCallbackServer() {
+  return new Promise((resolve, reject) => {
+    const callbackApp = express();
+    const mainAppUrl = getMainAppBaseUrl();
+    
+    callbackApp.get('/callback', async (req, res) => {
+      const { code, error, state } = req.query;
+
+      // Verify state to prevent CSRF attacks
+      if (state !== currentOAuthState) {
+        res.status(400).send('Invalid OAuth state. Please try again.');
+        return;
+      }
+
+      if (error) {
+        res.redirect(`${mainAppUrl}/?error=${encodeURIComponent(error)}`);
+        return;
+      }
+
+      if (!code) {
+        res.redirect(`${mainAppUrl}/?error=no_code`);
+        return;
+      }
+
+      try {
+        const redirectUri = getSpotifyRedirectUri();
+        const response = await fetch('https://accounts.spotify.com/api/token', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'Authorization': 'Basic ' + Buffer.from(SPOTIFY_CLIENT_ID + ':' + SPOTIFY_CLIENT_SECRET).toString('base64')
+          },
+          body: new URLSearchParams({
+            grant_type: 'authorization_code',
+            code: code,
+            redirect_uri: redirectUri
+          })
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          console.error('Token exchange error:', errorData);
+          res.redirect(`${mainAppUrl}/?error=token_exchange_failed`);
+          return;
+        }
+
+        const data = await response.json();
+        tokenData.accessToken = data.access_token;
+        tokenData.refreshToken = data.refresh_token;
+        tokenData.expiresAt = Date.now() + (data.expires_in * 1000);
+
+        // Redirect to main app with success
+        res.redirect(`${mainAppUrl}/?authenticated=true`);
+      } catch (err) {
+        console.error('Callback error:', err);
+        res.redirect(`${mainAppUrl}/?error=callback_failed`);
+      }
+    });
+
+    // Bind to 127.0.0.1 (loopback) on port 0 to get a random available port
+    oauthCallbackServer = callbackApp.listen(0, '127.0.0.1', () => {
+      oauthCallbackPort = oauthCallbackServer.address().port;
+      console.log(`🔐 OAuth callback server listening on http://127.0.0.1:${oauthCallbackPort}/callback`);
+      resolve(oauthCallbackPort);
+    });
+
+    oauthCallbackServer.on('error', (err) => {
+      console.error('Failed to start OAuth callback server:', err);
+      reject(new Error(`Failed to start OAuth callback server: ${err.message}`));
+    });
+  });
+}
+
+// Stop the OAuth callback server
+function stopOAuthCallbackServer() {
+  if (oauthCallbackServer) {
+    oauthCallbackServer.close();
+    oauthCallbackServer = null;
+    oauthCallbackPort = null;
+    console.log('🔐 OAuth callback server stopped');
+  }
+}
 
 // Get client IP address
 function getClientIP(req) {
@@ -177,27 +285,60 @@ app.get('/api/qrcode', async (req, res) => {
 });
 
 // Spotify OAuth login
-app.get('/login', authLimiter, (req, res) => {
+app.get('/login', authLimiter, async (req, res) => {
   if (!SPOTIFY_CLIENT_ID || !SPOTIFY_CLIENT_SECRET) {
     return res.status(500).send('Spotify credentials not configured. Please set SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET environment variables.');
   }
 
-  const state = crypto.randomBytes(16).toString('hex');
-  const scope = 'user-read-playback-state user-modify-playback-state';
+  try {
+    let redirectUri;
+    
+    if (USE_DYNAMIC_OAUTH_PORT) {
+      // Start OAuth callback server on dynamic port (RFC 8252 compliant)
+      if (!oauthCallbackServer) {
+        await startOAuthCallbackServer();
+      }
+      redirectUri = getSpotifyRedirectUri();
+      
+      if (!redirectUri) {
+        return res.status(500).send('Failed to start OAuth callback server. Unable to allocate a free port on the loopback interface.');
+      }
+    } else {
+      redirectUri = process.env.SPOTIFY_REDIRECT_URI;
+    }
 
-  const authUrl = new URL('https://accounts.spotify.com/authorize');
-  authUrl.searchParams.append('response_type', 'code');
-  authUrl.searchParams.append('client_id', SPOTIFY_CLIENT_ID);
-  authUrl.searchParams.append('scope', scope);
-  authUrl.searchParams.append('redirect_uri', SPOTIFY_REDIRECT_URI);
-  authUrl.searchParams.append('state', state);
+    const state = crypto.randomBytes(16).toString('hex');
+    currentOAuthState = state;
+    const scope = 'user-read-playback-state user-modify-playback-state';
 
-  res.redirect(authUrl.toString());
+    const authUrl = new URL('https://accounts.spotify.com/authorize');
+    authUrl.searchParams.append('response_type', 'code');
+    authUrl.searchParams.append('client_id', SPOTIFY_CLIENT_ID);
+    authUrl.searchParams.append('scope', scope);
+    authUrl.searchParams.append('redirect_uri', redirectUri);
+    authUrl.searchParams.append('state', state);
+
+    console.log(`🔐 Starting OAuth flow with redirect URI: ${redirectUri}`);
+    res.redirect(authUrl.toString());
+  } catch (err) {
+    console.error('OAuth login error:', err);
+    res.status(500).send(`Failed to start OAuth flow: ${err.message}`);
+  }
 });
 
-// Spotify OAuth callback
+// Spotify OAuth callback (for static redirect URI configuration)
 app.get('/callback', async (req, res) => {
-  const { code, error } = req.query;
+  // If using dynamic OAuth port, this endpoint should not receive callbacks
+  if (USE_DYNAMIC_OAUTH_PORT) {
+    return res.status(400).send('OAuth callback should be received on the dynamic loopback port. Please restart the OAuth flow by clicking "Connect Spotify" again.');
+  }
+
+  const { code, error, state } = req.query;
+
+  // Verify state to prevent CSRF attacks
+  if (state !== currentOAuthState) {
+    return res.redirect('/?error=invalid_state');
+  }
 
   if (error) {
     return res.redirect('/?error=' + encodeURIComponent(error));
@@ -217,7 +358,7 @@ app.get('/callback', async (req, res) => {
       body: new URLSearchParams({
         grant_type: 'authorization_code',
         code: code,
-        redirect_uri: SPOTIFY_REDIRECT_URI
+        redirect_uri: process.env.SPOTIFY_REDIRECT_URI
       })
     });
 
@@ -580,12 +721,40 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
+// Get OAuth configuration status
+app.get('/api/oauth-config', (req, res) => {
+  res.json({
+    useDynamicPort: USE_DYNAMIC_OAUTH_PORT,
+    callbackPort: oauthCallbackPort,
+    redirectUri: getSpotifyRedirectUri()
+  });
+});
+
 // Start server
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🎵 Party Jukebox running at http://localhost:${PORT}`);
   console.log(`   LAN access: http://<your-local-ip>:${PORT}`);
+  
   if (!SPOTIFY_CLIENT_ID || !SPOTIFY_CLIENT_SECRET) {
     console.log('\n⚠️  Warning: Spotify credentials not configured!');
     console.log('   Set SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET environment variables.');
   }
+  
+  if (USE_DYNAMIC_OAUTH_PORT) {
+    console.log('\n🔐 OAuth Mode: Dynamic loopback port (RFC 8252 compliant)');
+    console.log('   Redirect URI will be assigned when OAuth flow starts');
+    console.log('   Ensure your Spotify app allows any port on http://127.0.0.1/callback');
+  } else {
+    console.log(`\n🔐 OAuth Mode: Static redirect URI`);
+    console.log(`   Redirect URI: ${process.env.SPOTIFY_REDIRECT_URI}`);
+  }
 });
+
+// Export for testing
+module.exports = {
+  app,
+  startOAuthCallbackServer,
+  stopOAuthCallbackServer,
+  getSpotifyRedirectUri,
+  USE_DYNAMIC_OAUTH_PORT
+};
