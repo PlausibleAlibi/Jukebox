@@ -761,8 +761,10 @@ if (USE_HTTPS) {
   };
   
   https.createServer(sslOptions, app).listen(SSL_PORT, SSL_HOST, () => {
-    console.log(`🎵 Party Jukebox running at https://${SSL_HOST}:${SSL_PORT}`);
-    console.log(`   Secure LAN access: https://${SSL_HOST}:${SSL_PORT}`);
+    const displayHost = SSL_HOST === '0.0.0.0' ? '<your-local-ip>' : SSL_HOST;
+    const portSuffix = SSL_PORT === 443 ? '' : `:${SSL_PORT}`;
+    console.log(`🎵 Party Jukebox running at https://${displayHost}${portSuffix}`);
+    console.log(`   Secure LAN access: https://${displayHost}${portSuffix}`);
     
     if (!SPOTIFY_CLIENT_ID || !SPOTIFY_CLIENT_SECRET) {
       console.log('\n⚠️  Warning: Spotify credentials not configured!');
