@@ -200,7 +200,8 @@ app.use(generalLimiter);
 app.use(express.static(path.join(__dirname, 'public')));
 
 // HTTP request logging with morgan
-app.use(morgan(':remote-addr - :method :url :status :res[content-length] - :response-time ms', { stream: logger.stream }));
+const MORGAN_FORMAT = ':remote-addr - :method :url :status :res[content-length] - :response-time ms';
+app.use(morgan(MORGAN_FORMAT, { stream: logger.stream }));
 
 // Helper function to make Spotify API requests
 async function spotifyFetch(endpoint, options = {}) {
@@ -838,6 +839,5 @@ module.exports = {
   stopOAuthCallbackServer,
   getSpotifyRedirectUri,
   USE_DYNAMIC_OAUTH_PORT,
-  USE_HTTPS,
-  logger
+  USE_HTTPS
 };

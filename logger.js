@@ -67,10 +67,11 @@ const errorFileRotateTransport = new DailyRotateFile({
 logger.add(errorFileRotateTransport);
 
 // Create a stream object for morgan HTTP logging
+const HTTP_LOG_TYPE = 'http';
 logger.stream = {
   write: (message) => {
     // Remove trailing newline from morgan output
-    logger.info(message.trim(), { type: 'http' });
+    logger.info(message.trim(), { type: HTTP_LOG_TYPE });
   }
 };
 
