@@ -3,7 +3,6 @@ const express = require('express');
 const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
-const http = require('http');
 const https = require('https');
 const rateLimit = require('express-rate-limit');
 const QRCode = require('qrcode');
@@ -12,6 +11,11 @@ const logger = require('./logger');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Time constants (in milliseconds)
+const MS_PER_MINUTE = 60 * 1000;
+const RATE_LIMIT_WINDOW_MS = 15 * MS_PER_MINUTE;
+const TOKEN_REFRESH_BUFFER_MS = 5 * MS_PER_MINUTE;
 
 // SSL/HTTPS configuration
 const SSL_CERT_PATH = process.env.SSL_CERT_PATH || '';
@@ -38,14 +42,14 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
 
 // Rate limiting configuration
 const generalLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
+  windowMs: RATE_LIMIT_WINDOW_MS,
+  max: 100,
   message: { error: 'Too many requests, please try again later.' }
 });
 
 const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 10, // limit each IP to 10 auth attempts per windowMs
+  windowMs: RATE_LIMIT_WINDOW_MS,
+  max: 10,
   message: { error: 'Too many authentication attempts, please try again later.' }
 });
 
@@ -77,6 +81,11 @@ let oauthCallbackServer = null;
 let oauthCallbackPort = null;
 let currentOAuthState = null;
 
+// Generate Spotify Basic Auth header
+function getSpotifyBasicAuth() {
+  return 'Basic ' + Buffer.from(SPOTIFY_CLIENT_ID + ':' + SPOTIFY_CLIENT_SECRET).toString('base64');
+}
+
 // Get the base URL for the main application server
 function getMainAppBaseUrl() {
   // OAuth callback always uses the loopback interface, not the SSL host
@@ -92,6 +101,46 @@ function getSpotifyRedirectUri() {
     return `http://127.0.0.1:${oauthCallbackPort}/callback`;
   }
   return null;
+}
+
+/**
+ * Exchange OAuth authorization code for tokens
+ * @param {string} code - The authorization code from Spotify
+ * @param {string} redirectUri - The redirect URI used in the authorization request
+ * @returns {Promise<{success: boolean, error?: string}>}
+ */
+async function exchangeCodeForTokens(code, redirectUri) {
+  try {
+    const response = await fetch('https://accounts.spotify.com/api/token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Authorization': getSpotifyBasicAuth()
+      },
+      body: new URLSearchParams({
+        grant_type: 'authorization_code',
+        code: code,
+        redirect_uri: redirectUri
+      })
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      logger.error('OAuth token exchange failed', { error: errorData });
+      return { success: false, error: 'token_exchange_failed' };
+    }
+
+    const data = await response.json();
+    tokenData.accessToken = data.access_token;
+    tokenData.refreshToken = data.refresh_token;
+    tokenData.expiresAt = Date.now() + (data.expires_in * 1000);
+    
+    logger.info('OAuth authentication successful');
+    return { success: true };
+  } catch (err) {
+    logger.error('OAuth callback error', { error: err.message });
+    return { success: false, error: 'callback_failed' };
+  }
 }
 
 // Start the OAuth callback server on a random available port (RFC 8252)
@@ -119,40 +168,13 @@ async function startOAuthCallbackServer() {
         return;
       }
 
-      try {
-        const redirectUri = getSpotifyRedirectUri();
-        const response = await fetch('https://accounts.spotify.com/api/token', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'Authorization': 'Basic ' + Buffer.from(SPOTIFY_CLIENT_ID + ':' + SPOTIFY_CLIENT_SECRET).toString('base64')
-          },
-          body: new URLSearchParams({
-            grant_type: 'authorization_code',
-            code: code,
-            redirect_uri: redirectUri
-          })
-        });
-
-        if (!response.ok) {
-          const errorData = await response.json();
-          logger.error('OAuth token exchange failed', { error: errorData });
-          res.redirect(`${mainAppUrl}/?error=token_exchange_failed`);
-          return;
-        }
-
-        const data = await response.json();
-        tokenData.accessToken = data.access_token;
-        tokenData.refreshToken = data.refresh_token;
-        tokenData.expiresAt = Date.now() + (data.expires_in * 1000);
-        
-        logger.info('OAuth authentication successful');
-
-        // Redirect to main app with success
+      const redirectUri = getSpotifyRedirectUri();
+      const result = await exchangeCodeForTokens(code, redirectUri);
+      
+      if (result.success) {
         res.redirect(`${mainAppUrl}/?authenticated=true`);
-      } catch (err) {
-        logger.error('OAuth callback error', { error: err.message });
-        res.redirect(`${mainAppUrl}/?error=callback_failed`);
+      } else {
+        res.redirect(`${mainAppUrl}/?error=${result.error}`);
       }
     });
 
@@ -233,7 +255,7 @@ async function refreshAccessToken() {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
-        'Authorization': 'Basic ' + Buffer.from(SPOTIFY_CLIENT_ID + ':' + SPOTIFY_CLIENT_SECRET).toString('base64')
+        'Authorization': getSpotifyBasicAuth()
       },
       body: new URLSearchParams({
         grant_type: 'refresh_token',
@@ -265,8 +287,8 @@ async function ensureToken(req, res, next) {
     return res.status(401).json({ error: 'Host not authenticated. Please authenticate first.' });
   }
 
-  // Refresh token if expired or about to expire (within 5 minutes)
-  if (Date.now() >= tokenData.expiresAt - 300000) {
+  // Refresh token if expired or about to expire (within buffer time)
+  if (Date.now() >= tokenData.expiresAt - TOKEN_REFRESH_BUFFER_MS) {
     const refreshed = await refreshAccessToken();
     if (!refreshed) {
       tokenData = { accessToken: null, refreshToken: null, expiresAt: null };
@@ -379,37 +401,12 @@ app.get('/callback', async (req, res) => {
     return res.redirect('/?error=no_code');
   }
 
-  try {
-    const response = await fetch('https://accounts.spotify.com/api/token', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Authorization': 'Basic ' + Buffer.from(SPOTIFY_CLIENT_ID + ':' + SPOTIFY_CLIENT_SECRET).toString('base64')
-      },
-      body: new URLSearchParams({
-        grant_type: 'authorization_code',
-        code: code,
-        redirect_uri: process.env.SPOTIFY_REDIRECT_URI
-      })
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json();
-      logger.error('OAuth token exchange failed (static)', { error: errorData });
-      return res.redirect('/?error=token_exchange_failed');
-    }
-
-    const data = await response.json();
-    tokenData.accessToken = data.access_token;
-    tokenData.refreshToken = data.refresh_token;
-    tokenData.expiresAt = Date.now() + (data.expires_in * 1000);
-    
-    logger.info('OAuth authentication successful (static callback)');
-
+  const result = await exchangeCodeForTokens(code, process.env.SPOTIFY_REDIRECT_URI);
+  
+  if (result.success) {
     res.redirect('/?authenticated=true');
-  } catch (err) {
-    logger.error('OAuth callback error (static)', { error: err.message });
-    res.redirect('/?error=callback_failed');
+  } else {
+    res.redirect('/?error=' + result.error);
   }
 });
 
