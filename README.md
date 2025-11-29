@@ -287,9 +287,88 @@ pm2 save
 
 ### Quick Deploy with Docker
 
+Docker deployment runs on **HTTPS port 443** by default for secure connections.
+
 ```bash
-docker-compose up -d
+# 1. Generate SSL certificates (using mkcert - recommended)
+mkdir -p certs
+cd certs
+mkcert 192.168.x.x localhost  # Replace with your LAN IP
+cd ..
+
+# 2. Configure environment
+cp .env.example .env
+# Edit .env: set SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET
+# Update SSL_CERT_PATH and SSL_KEY_PATH with your certificate filenames
+
+# 3. Start the container
+./docker-start.sh
+
+# 4. Access the app
+# https://192.168.x.x/ (replace with your LAN IP)
 ```
+
+#### Docker Start/Stop Scripts
+
+Convenience scripts are provided for managing the Docker container. These scripts handle port mapping, environment loading, and volume mounts automatically.
+
+| Script | Description |
+|--------|-------------|
+| `./docker-start.sh` | Build and start the container with all volume mounts (.env, certs, logs) |
+| `./docker-stop.sh` | Stop and remove the container (logs are preserved) |
+
+```bash
+# Start the container
+./docker-start.sh
+
+# Stop the container
+./docker-stop.sh
+
+# View logs
+docker logs -f jukebox
+
+# Or use docker-compose directly
+docker-compose up -d    # Start
+docker-compose down     # Stop
+docker-compose logs -f  # View logs
+```
+
+#### Docker Volume Mounts
+
+The Docker scripts automatically mount the following directories:
+
+| Host Path | Container Path | Description |
+|-----------|----------------|-------------|
+| `./.env` | `/app/.env` | Environment configuration (via --env-file) |
+| `./certs/` | `/app/certs/` | SSL certificates (read-only) |
+| `./logs/` | `/app/logs/` | Application logs (persistent) |
+
+#### Docker HTTPS Configuration
+
+| Environment Variable | Description | Default |
+|---------------------|-------------|---------|
+| `SSL_CERT_PATH` | Path to SSL certificate (inside container: `/app/certs/...`) | Required for HTTPS |
+| `SSL_KEY_PATH` | Path to SSL private key (inside container: `/app/certs/...`) | Required for HTTPS |
+| `SSL_PORT` | HTTPS port | `443` |
+| `SSL_HOST` | IP address to bind | `0.0.0.0` |
+
+#### Docker Healthcheck
+
+The Docker healthcheck probes `https://localhost:443/api/status` using wget with `--no-check-certificate` to support self-signed certificates. The `/api/status` endpoint returns:
+
+```json
+{
+  "status": "ok",
+  "authenticated": false,
+  "configured": false
+}
+```
+
+#### Troubleshooting Docker HTTPS
+
+- **Port 443 binding fails**: Port 443 requires root privileges. Either run Docker as root or use a higher port mapping (e.g., `8443:443` in docker-compose.yml)
+- **Certificate not found**: Ensure the `certs/` directory contains your certificates and is mounted correctly
+- **Healthcheck failing**: Verify SSL_CERT_PATH and SSL_KEY_PATH point to valid certificates inside `/app/certs/`
 
 ### Update and Restart Script
 
