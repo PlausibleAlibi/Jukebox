@@ -7,6 +7,8 @@ const http = require('http');
 const https = require('https');
 const rateLimit = require('express-rate-limit');
 const QRCode = require('qrcode');
+const morgan = require('morgan');
+const logger = require('./logger');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -21,11 +23,11 @@ const USE_HTTPS = !!(SSL_CERT_PATH && SSL_KEY_PATH);
 // Validate SSL configuration
 if (USE_HTTPS) {
   if (!fs.existsSync(SSL_CERT_PATH)) {
-    console.error(`❌ SSL certificate file not found: ${SSL_CERT_PATH}`);
+    logger.error(`SSL certificate file not found: ${SSL_CERT_PATH}`);
     process.exit(1);
   }
   if (!fs.existsSync(SSL_KEY_PATH)) {
-    console.error(`❌ SSL key file not found: ${SSL_KEY_PATH}`);
+    logger.error(`SSL key file not found: ${SSL_KEY_PATH}`);
     process.exit(1);
   }
 }
@@ -134,7 +136,7 @@ async function startOAuthCallbackServer() {
 
         if (!response.ok) {
           const errorData = await response.json();
-          console.error('Token exchange error:', errorData);
+          logger.error('OAuth token exchange failed', { error: errorData });
           res.redirect(`${mainAppUrl}/?error=token_exchange_failed`);
           return;
         }
@@ -143,11 +145,13 @@ async function startOAuthCallbackServer() {
         tokenData.accessToken = data.access_token;
         tokenData.refreshToken = data.refresh_token;
         tokenData.expiresAt = Date.now() + (data.expires_in * 1000);
+        
+        logger.info('OAuth authentication successful');
 
         // Redirect to main app with success
         res.redirect(`${mainAppUrl}/?authenticated=true`);
       } catch (err) {
-        console.error('Callback error:', err);
+        logger.error('OAuth callback error', { error: err.message });
         res.redirect(`${mainAppUrl}/?error=callback_failed`);
       }
     });
@@ -155,12 +159,12 @@ async function startOAuthCallbackServer() {
     // Bind to 127.0.0.1 (loopback) on port 0 to get a random available port
     oauthCallbackServer = callbackApp.listen(0, '127.0.0.1', () => {
       oauthCallbackPort = oauthCallbackServer.address().port;
-      console.log(`🔐 OAuth callback server listening on http://127.0.0.1:${oauthCallbackPort}/callback`);
+      logger.info('OAuth callback server started', { port: oauthCallbackPort, url: `http://127.0.0.1:${oauthCallbackPort}/callback` });
       resolve(oauthCallbackPort);
     });
 
     oauthCallbackServer.on('error', (err) => {
-      console.error('Failed to start OAuth callback server:', err);
+      logger.error('Failed to start OAuth callback server', { error: err.message });
       reject(new Error(`Failed to start OAuth callback server: ${err.message}`));
     });
   });
@@ -172,7 +176,7 @@ function stopOAuthCallbackServer() {
     oauthCallbackServer.close();
     oauthCallbackServer = null;
     oauthCallbackPort = null;
-    console.log('🔐 OAuth callback server stopped');
+    logger.info('OAuth callback server stopped');
   }
 }
 
@@ -194,6 +198,10 @@ function generateAdminToken() {
 app.use(express.json());
 app.use(generalLimiter);
 app.use(express.static(path.join(__dirname, 'public')));
+
+// HTTP request logging with morgan
+const MORGAN_FORMAT = ':remote-addr - :method :url :status :res[content-length] - :response-time ms';
+app.use(morgan(MORGAN_FORMAT, { stream: logger.stream }));
 
 // Helper function to make Spotify API requests
 async function spotifyFetch(endpoint, options = {}) {
@@ -243,9 +251,10 @@ async function refreshAccessToken() {
     if (data.refresh_token) {
       tokenData.refreshToken = data.refresh_token;
     }
+    logger.info('Spotify access token refreshed');
     return true;
   } catch (error) {
-    console.error('Error refreshing token:', error);
+    logger.error('Error refreshing Spotify token', { error: error.message });
     return false;
   }
 }
@@ -301,7 +310,7 @@ app.get('/api/qrcode', async (req, res) => {
     
     res.json({ qrcode: qrDataUrl, url });
   } catch (err) {
-    console.error('QR code generation error:', err);
+    logger.error('QR code generation error', { error: err.message });
     res.status(500).json({ error: 'Failed to generate QR code' });
   }
 });
@@ -340,10 +349,10 @@ app.get('/login', authLimiter, async (req, res) => {
     authUrl.searchParams.append('redirect_uri', redirectUri);
     authUrl.searchParams.append('state', state);
 
-    console.log(`🔐 Starting OAuth flow with redirect URI: ${redirectUri}`);
+    logger.info('OAuth flow started', { redirectUri, useDynamicPort: USE_DYNAMIC_OAUTH_PORT });
     res.redirect(authUrl.toString());
   } catch (err) {
-    console.error('OAuth login error:', err);
+    logger.error('OAuth login error', { error: err.message });
     res.status(500).send(`Failed to start OAuth flow: ${err.message}`);
   }
 });
@@ -386,7 +395,7 @@ app.get('/callback', async (req, res) => {
 
     if (!response.ok) {
       const errorData = await response.json();
-      console.error('Token exchange error:', errorData);
+      logger.error('OAuth token exchange failed (static)', { error: errorData });
       return res.redirect('/?error=token_exchange_failed');
     }
 
@@ -394,10 +403,12 @@ app.get('/callback', async (req, res) => {
     tokenData.accessToken = data.access_token;
     tokenData.refreshToken = data.refresh_token;
     tokenData.expiresAt = Date.now() + (data.expires_in * 1000);
+    
+    logger.info('OAuth authentication successful (static callback)');
 
     res.redirect('/?authenticated=true');
   } catch (err) {
-    console.error('Callback error:', err);
+    logger.error('OAuth callback error (static)', { error: err.message });
     res.redirect('/?error=callback_failed');
   }
 });
@@ -431,7 +442,7 @@ app.get('/api/search', ensureToken, async (req, res) => {
 
     res.json({ tracks });
   } catch (err) {
-    console.error('Search error:', err);
+    logger.error('Spotify search error', { error: err.message, query: q });
     res.status(500).json({ error: 'Failed to search tracks' });
   }
 });
@@ -495,7 +506,7 @@ app.post('/api/queue', ensureToken, async (req, res) => {
     const errorData = await response.json();
     return res.status(response.status).json({ error: errorData.error?.message || 'Failed to add to queue' });
   } catch (err) {
-    console.error('Queue error:', err);
+    logger.error('Spotify queue error', { error: err.message, uri, clientIP });
     res.status(500).json({ error: 'Failed to add track to queue' });
   }
 });
@@ -577,7 +588,7 @@ app.get('/api/playback', ensureToken, async (req, res) => {
       } : null
     });
   } catch (err) {
-    console.error('Playback error:', err);
+    logger.error('Spotify playback state error', { error: err.message });
     res.status(500).json({ error: 'Failed to get playback state' });
   }
 });
@@ -585,6 +596,7 @@ app.get('/api/playback', ensureToken, async (req, res) => {
 // Logout (clear tokens)
 app.post('/api/logout', (req, res) => {
   tokenData = { accessToken: null, refreshToken: null, expiresAt: null };
+  logger.info('User logged out, tokens cleared');
   res.json({ success: true });
 });
 
@@ -623,9 +635,11 @@ app.post('/api/admin/login', authLimiter, (req, res) => {
   if (password === ADMIN_PASSWORD) {
     const token = generateAdminToken();
     adminSessions.add(token);
+    logger.info('Admin login successful', { ip: getClientIP(req) });
     return res.json({ success: true, token });
   }
   
+  logger.warn('Admin login failed: invalid password', { ip: getClientIP(req) });
   res.status(403).json({ error: 'Invalid password' });
 });
 
@@ -637,6 +651,7 @@ app.post('/api/admin/skip', requireAdmin, ensureToken, async (req, res) => {
     });
 
     if (response.status === 204 || response.ok) {
+      logger.info('Admin skipped track', { ip: getClientIP(req) });
       return res.json({ success: true, message: 'Track skipped' });
     }
 
@@ -647,7 +662,7 @@ app.post('/api/admin/skip', requireAdmin, ensureToken, async (req, res) => {
     const errorData = await response.json();
     return res.status(response.status).json({ error: errorData.error?.message || 'Failed to skip track' });
   } catch (err) {
-    console.error('Skip error:', err);
+    logger.error('Admin skip track error', { error: err.message, ip: getClientIP(req) });
     res.status(500).json({ error: 'Failed to skip track' });
   }
 });
@@ -664,6 +679,7 @@ app.delete('/api/admin/queue/:trackId', requireAdmin, (req, res) => {
   partyQueue.splice(index, 1);
   delete trackVotes[trackId];
   
+  logger.info('Admin removed track from queue', { trackId, ip: getClientIP(req) });
   res.json({ success: true, message: 'Track removed from party queue' });
 });
 
@@ -671,6 +687,7 @@ app.delete('/api/admin/queue/:trackId', requireAdmin, (req, res) => {
 app.delete('/api/admin/queue', requireAdmin, (req, res) => {
   partyQueue = [];
   trackVotes = {};
+  logger.info('Admin cleared party queue', { ip: getClientIP(req) });
   res.json({ success: true, message: 'Party queue cleared' });
 });
 
@@ -680,9 +697,11 @@ app.post('/api/admin/reset-limits', requireAdmin, (req, res) => {
   
   if (ip) {
     delete ipTrackCount[ip];
+    logger.info('Admin reset track limit for IP', { targetIp: ip, ip: getClientIP(req) });
     res.json({ success: true, message: `Track limit reset for ${ip}` });
   } else {
     ipTrackCount = {};
+    logger.info('Admin reset all track limits', { ip: getClientIP(req) });
     res.json({ success: true, message: 'All track limits reset' });
   }
 });
@@ -700,6 +719,7 @@ app.post('/api/admin/pause', requireAdmin, ensureToken, async (req, res) => {
     });
 
     if (response.status === 204 || response.ok) {
+      logger.info('Admin paused playback', { ip: getClientIP(req) });
       return res.json({ success: true, message: 'Playback paused' });
     }
 
@@ -710,7 +730,7 @@ app.post('/api/admin/pause', requireAdmin, ensureToken, async (req, res) => {
     const errorData = await response.json();
     return res.status(response.status).json({ error: errorData.error?.message || 'Failed to pause' });
   } catch (err) {
-    console.error('Pause error:', err);
+    logger.error('Admin pause playback error', { error: err.message, ip: getClientIP(req) });
     res.status(500).json({ error: 'Failed to pause playback' });
   }
 });
@@ -723,6 +743,7 @@ app.post('/api/admin/play', requireAdmin, ensureToken, async (req, res) => {
     });
 
     if (response.status === 204 || response.ok) {
+      logger.info('Admin resumed playback', { ip: getClientIP(req) });
       return res.json({ success: true, message: 'Playback resumed' });
     }
 
@@ -733,7 +754,7 @@ app.post('/api/admin/play', requireAdmin, ensureToken, async (req, res) => {
     const errorData = await response.json();
     return res.status(response.status).json({ error: errorData.error?.message || 'Failed to resume' });
   } catch (err) {
-    console.error('Play error:', err);
+    logger.error('Admin resume playback error', { error: err.message, ip: getClientIP(req) });
     res.status(500).json({ error: 'Failed to resume playback' });
   }
 });
@@ -763,41 +784,50 @@ if (USE_HTTPS) {
   https.createServer(sslOptions, app).listen(SSL_PORT, SSL_HOST, () => {
     const displayHost = SSL_HOST === '0.0.0.0' ? '<your-local-ip>' : SSL_HOST;
     const portSuffix = SSL_PORT === 443 ? '' : `:${SSL_PORT}`;
-    console.log(`🎵 Party Jukebox running at https://${displayHost}${portSuffix}`);
-    console.log(`   Secure LAN access: https://${displayHost}${portSuffix}`);
+    logger.info('Party Jukebox server started (HTTPS)', {
+      url: `https://${displayHost}${portSuffix}`,
+      host: SSL_HOST,
+      port: SSL_PORT
+    });
     
     if (!SPOTIFY_CLIENT_ID || !SPOTIFY_CLIENT_SECRET) {
-      console.log('\n⚠️  Warning: Spotify credentials not configured!');
-      console.log('   Set SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET environment variables.');
+      logger.warn('Spotify credentials not configured', {
+        message: 'Set SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET environment variables'
+      });
     }
     
     if (USE_DYNAMIC_OAUTH_PORT) {
-      console.log('\n🔐 OAuth Mode: Dynamic loopback port (RFC 8252 compliant)');
-      console.log('   Redirect URI will be assigned when OAuth flow starts');
-      console.log('   Ensure your Spotify app allows any port on http://127.0.0.1/callback');
+      logger.info('OAuth Mode: Dynamic loopback port (RFC 8252 compliant)', {
+        note: 'Redirect URI will be assigned when OAuth flow starts'
+      });
     } else {
-      console.log(`\n🔐 OAuth Mode: Static redirect URI`);
-      console.log(`   Redirect URI: ${process.env.SPOTIFY_REDIRECT_URI}`);
+      logger.info('OAuth Mode: Static redirect URI', {
+        redirectUri: process.env.SPOTIFY_REDIRECT_URI
+      });
     }
   });
 } else {
   // HTTP server (default)
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🎵 Party Jukebox running at http://localhost:${PORT}`);
-    console.log(`   LAN access: http://<your-local-ip>:${PORT}`);
+    logger.info('Party Jukebox server started (HTTP)', {
+      url: `http://localhost:${PORT}`,
+      port: PORT
+    });
     
     if (!SPOTIFY_CLIENT_ID || !SPOTIFY_CLIENT_SECRET) {
-      console.log('\n⚠️  Warning: Spotify credentials not configured!');
-      console.log('   Set SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET environment variables.');
+      logger.warn('Spotify credentials not configured', {
+        message: 'Set SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET environment variables'
+      });
     }
     
     if (USE_DYNAMIC_OAUTH_PORT) {
-      console.log('\n🔐 OAuth Mode: Dynamic loopback port (RFC 8252 compliant)');
-      console.log('   Redirect URI will be assigned when OAuth flow starts');
-      console.log('   Ensure your Spotify app allows any port on http://127.0.0.1/callback');
+      logger.info('OAuth Mode: Dynamic loopback port (RFC 8252 compliant)', {
+        note: 'Redirect URI will be assigned when OAuth flow starts'
+      });
     } else {
-      console.log(`\n🔐 OAuth Mode: Static redirect URI`);
-      console.log(`   Redirect URI: ${process.env.SPOTIFY_REDIRECT_URI}`);
+      logger.info('OAuth Mode: Static redirect URI', {
+        redirectUri: process.env.SPOTIFY_REDIRECT_URI
+      });
     }
   });
 }
