@@ -12,6 +12,13 @@
 # Volume Mounts:
 #   - ./certs:/app/certs:ro  - SSL certificates (read-only)
 #   - ./logs:/app/logs       - Application logs (persistent)
+#
+# Log Directory Permissions:
+# The container runs as a non-root user 'jukebox' (UID 1001) for security.
+# Before running, ensure the host logs directory is writable:
+#   mkdir -p logs && chmod 777 logs
+# Or match the container user:
+#   mkdir -p logs && sudo chown 1001:1001 logs
 
 FROM node:20-alpine
 
@@ -29,6 +36,9 @@ RUN npm ci --only=production && npm cache clean --force
 
 # Copy application files
 COPY --chown=jukebox:jukebox . .
+
+# Create logs directory with proper permissions for the non-root user
+RUN mkdir -p /app/logs && chown jukebox:jukebox /app/logs && chmod 755 /app/logs
 
 # Switch to non-root user
 USER jukebox
