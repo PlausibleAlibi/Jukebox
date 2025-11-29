@@ -88,6 +88,70 @@ ipconfig
 | `SSL_KEY_PATH` | Path to SSL private key file | Empty (disabled) |
 | `SSL_PORT` | HTTPS server port | `443` |
 | `SSL_HOST` | IP address/hostname to bind for HTTPS | `0.0.0.0` |
+| `LOG_LEVEL` | Logging level (error, warn, info, http, verbose, debug, silly) | `info` |
+
+### Logging
+
+Party Jukebox uses structured logging with Winston and Morgan for comprehensive monitoring and debugging.
+
+#### Log Files
+
+Logs are written to both the console and rotating log files:
+
+| File | Description |
+|------|-------------|
+| `logs/jukebox-YYYY-MM-DD.log` | All log messages (rotates daily) |
+| `logs/jukebox-error-YYYY-MM-DD.log` | Error-level logs only (rotates daily) |
+
+Log files are automatically rotated daily, with:
+- Maximum file size: 20MB
+- Retention period: 14 days
+
+#### Log Levels
+
+Set the `LOG_LEVEL` environment variable to control verbosity:
+
+```bash
+# In .env
+LOG_LEVEL=debug  # Most verbose
+LOG_LEVEL=info   # Default - server events, requests
+LOG_LEVEL=warn   # Warnings and errors only
+LOG_LEVEL=error  # Errors only
+```
+
+#### What's Logged
+
+- **Server events**: Startup, shutdown, configuration
+- **HTTP requests**: Method, URL, status code, response time, client IP (via Morgan)
+- **OAuth events**: Login flow, token refresh, authentication success/failure
+- **Spotify API**: Search queries, queue operations, playback errors
+- **Admin actions**: Login attempts, skip/pause/play, queue management
+- **Errors**: All errors with stack traces and context
+
+#### Log Format
+
+**Console output**: Human-readable with timestamps and colors
+```
+2025-01-15 14:30:45 [info]: Party Jukebox server started (HTTP) {"url":"http://localhost:3000","port":3000}
+```
+
+**File output**: Structured JSON for parsing and analysis
+```json
+{"level":"info","message":"Party Jukebox server started (HTTP)","url":"http://localhost:3000","port":3000,"timestamp":"2025-01-15T14:30:45.123Z","service":"party-jukebox"}
+```
+
+#### Viewing Logs
+
+```bash
+# View recent logs
+tail -f logs/jukebox-$(date +%Y-%m-%d).log
+
+# Search for errors
+grep '"level":"error"' logs/jukebox-*.log
+
+# Parse JSON logs with jq
+cat logs/jukebox-*.log | jq '. | select(.level == "error")'
+```
 
 ### HTTPS/SSL Configuration
 
@@ -354,6 +418,7 @@ Guests can only add a limited number of tracks. The host can reset limits from t
 - **API**: Spotify Web API
 - **Auth**: OAuth 2.0 with refresh tokens
 - **QR Code**: qrcode library
+- **Logging**: Winston (structured logs) + Morgan (HTTP request logging)
 
 ## License
 
