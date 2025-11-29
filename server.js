@@ -304,6 +304,7 @@ async function ensureToken(req, res, next) {
 // Check authentication status
 app.get('/api/status', (req, res) => {
   res.json({
+    status: 'ok',
     authenticated: isAuthenticated(),
     configured: !!(SPOTIFY_CLIENT_ID && SPOTIFY_CLIENT_SECRET)
   });

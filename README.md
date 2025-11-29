@@ -287,9 +287,75 @@ pm2 save
 
 ### Quick Deploy with Docker
 
+Docker deployment runs on **HTTPS port 443** by default for secure connections.
+
 ```bash
-docker-compose up -d
+# 1. Generate SSL certificates (using mkcert - recommended)
+mkdir -p certs
+cd certs
+mkcert 192.168.x.x localhost  # Replace with your LAN IP
+cd ..
+
+# 2. Configure environment
+cp .env.example .env
+# Edit .env: set SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET
+# Update SSL_CERT_PATH and SSL_KEY_PATH with your certificate filenames
+
+# 3. Start the container
+./docker-start.sh
+
+# 4. Access the app
+# https://192.168.x.x/ (replace with your LAN IP)
 ```
+
+#### Docker Start/Stop Scripts
+
+Convenience scripts are provided for managing the Docker container:
+
+| Script | Description |
+|--------|-------------|
+| `./docker-start.sh` | Start the Party Jukebox container (checks for .env and certs) |
+| `./docker-stop.sh` | Stop the Party Jukebox container |
+
+```bash
+# Start the container
+./docker-start.sh
+
+# Stop the container
+./docker-stop.sh
+
+# Or use docker-compose directly
+docker-compose up -d    # Start
+docker-compose down     # Stop
+docker-compose logs -f  # View logs
+```
+
+#### Docker HTTPS Configuration
+
+| Environment Variable | Description | Default |
+|---------------------|-------------|---------|
+| `SSL_CERT_PATH` | Path to SSL certificate (inside container: `/app/certs/...`) | Required for HTTPS |
+| `SSL_KEY_PATH` | Path to SSL private key (inside container: `/app/certs/...`) | Required for HTTPS |
+| `SSL_PORT` | HTTPS port | `443` |
+| `SSL_HOST` | IP address to bind | `0.0.0.0` |
+
+#### Docker Healthcheck
+
+The Docker healthcheck probes `https://localhost:443/api/status` using wget with `--no-check-certificate` to support self-signed certificates. The `/api/status` endpoint returns:
+
+```json
+{
+  "status": "ok",
+  "authenticated": false,
+  "configured": false
+}
+```
+
+#### Troubleshooting Docker HTTPS
+
+- **Port 443 binding fails**: Port 443 requires root privileges. Either run Docker as root or use a higher port mapping (e.g., `8443:443` in docker-compose.yml)
+- **Certificate not found**: Ensure the `certs/` directory contains your certificates and is mounted correctly
+- **Healthcheck failing**: Verify SSL_CERT_PATH and SSL_KEY_PATH point to valid certificates inside `/app/certs/`
 
 ### Update and Restart Script
 

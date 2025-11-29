@@ -43,9 +43,10 @@ describe('Party Jukebox Server', () => {
     app.use(express.json());
     app.use(express.static(path.join(__dirname, 'public')));
 
-    // Mock status endpoint for testing
+    // Mock status endpoint for testing (matches server.js /api/status response)
     app.get('/api/status', (req, res) => {
       res.json({
+        status: 'ok',
         authenticated: false,
         configured: false
       });
@@ -88,6 +89,7 @@ describe('Party Jukebox Server', () => {
 
     assert.strictEqual(response.statusCode, 200);
     const data = JSON.parse(response.body);
+    assert.strictEqual(data.status, 'ok', 'Should return status: ok for healthcheck');
     assert.strictEqual(typeof data.authenticated, 'boolean');
     assert.strictEqual(typeof data.configured, 'boolean');
   });

@@ -1,6 +1,36 @@
 # Party Jukebox Docker Compose Configuration
 # Usage: docker-compose up -d
-# For production with Caddy reverse proxy
+#
+# HTTPS-by-Default Configuration:
+# ================================
+# This configuration runs Party Jukebox on HTTPS port 443 by default.
+#
+# Prerequisites:
+# 1. Generate SSL certificates (see README.md for mkcert or openssl instructions)
+# 2. Configure .env with SSL paths:
+#    SSL_CERT_PATH=./certs/your-cert.pem
+#    SSL_KEY_PATH=./certs/your-key.pem
+#    SSL_PORT=443
+#
+# Certificate Generation with mkcert (recommended):
+#   mkdir -p certs
+#   cd certs
+#   mkcert 192.168.x.x localhost  # Replace with your LAN IP
+#
+# Certificate Generation with openssl (self-signed):
+#   mkdir -p certs
+#   openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+#     -keyout certs/jukebox.key -out certs/jukebox.crt \
+#     -subj "/CN=jukebox.local"
+#
+# Troubleshooting Port 443:
+# - Port 443 requires root/elevated privileges on most systems
+# - If you cannot bind to 443, use a higher port (e.g., 8443:443) and update SSL_PORT in .env
+# - Ensure no other service (nginx, apache, etc.) is using port 443
+#
+# For development/HTTP-only mode:
+# - Remove SSL_CERT_PATH and SSL_KEY_PATH from .env
+# - Change ports to "3000:3000" and update healthcheck to use http://localhost:3000
 
 services:
   jukebox:
@@ -8,13 +38,16 @@ services:
     container_name: jukebox
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "443:443"
     env_file:
       - .env
     environment:
       - NODE_ENV=production
+    volumes:
+      # Mount certificate directory for HTTPS (ensure certs exist before starting)
+      - ./certs:/app/certs:ro
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/status"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "--no-check-certificate", "https://localhost:443/api/status"]
       interval: 30s
       timeout: 10s
       retries: 3
