@@ -501,8 +501,27 @@ app.post('/api/queue', ensureToken, async (req, res) => {
       return res.status(404).json({ error: 'No active device found. Please start playing on Spotify first.' });
     }
 
-    const errorData = await response.json();
-    return res.status(response.status).json({ error: errorData.error?.message || 'Failed to add to queue' });
+    // Spotify may return non-JSON error responses (e.g., plain strings).
+    // First read as text, then try to parse as JSON. Fall back to the text or generic message.
+    let errorMessage = 'Failed to add to queue';
+    try {
+      const responseText = await response.text();
+      if (responseText && responseText.trim()) {
+        try {
+          // Try to parse as JSON
+          const errorData = JSON.parse(responseText);
+          if (errorData.error?.message) {
+            errorMessage = errorData.error.message;
+          }
+        } catch {
+          // Not valid JSON, use the raw text as the error message
+          errorMessage = responseText.trim();
+        }
+      }
+    } catch {
+      // Failed to read response body, use the generic error message
+    }
+    return res.status(response.status).json({ error: errorMessage });
   } catch (err) {
     logger.error('Spotify queue error', { error: err.message, uri, clientIP });
     res.status(500).json({ error: 'Failed to add track to queue' });

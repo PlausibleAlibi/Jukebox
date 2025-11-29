@@ -260,3 +260,91 @@ describe('SSL/HTTPS Configuration', () => {
     assert.strictEqual(sslHost, '192.168.50.159', 'Should use custom SSL host');
   });
 });
+
+describe('Spotify API Error Parsing', () => {
+  /**
+   * Helper function to parse Spotify error responses.
+   * This mirrors the error parsing logic in POST /api/queue.
+   * Spotify may return non-JSON error responses (e.g., plain strings).
+   * First read as text, then try to parse as JSON. Fall back to the text or generic message.
+   */
+  function parseSpotifyErrorResponse(responseText) {
+    let errorMessage = 'Failed to add to queue';
+    if (responseText && responseText.trim()) {
+      try {
+        // Try to parse as JSON
+        const errorData = JSON.parse(responseText);
+        if (errorData.error?.message) {
+          errorMessage = errorData.error.message;
+        }
+      } catch {
+        // Not valid JSON, use the raw text as the error message
+        errorMessage = responseText.trim();
+      }
+    }
+    return errorMessage;
+  }
+
+  it('should parse JSON error response from Spotify', () => {
+    const jsonError = JSON.stringify({
+      error: {
+        status: 403,
+        message: 'Player command failed: Restriction violated'
+      }
+    });
+    
+    const result = parseSpotifyErrorResponse(jsonError);
+    assert.strictEqual(result, 'Player command failed: Restriction violated');
+  });
+
+  it('should handle plain text error response from Spotify', () => {
+    const plainTextError = 'Service unavailable';
+    
+    const result = parseSpotifyErrorResponse(plainTextError);
+    assert.strictEqual(result, 'Service unavailable');
+  });
+
+  it('should handle HTML error response from Spotify', () => {
+    const htmlError = '<html><body>Gateway Timeout</body></html>';
+    
+    const result = parseSpotifyErrorResponse(htmlError);
+    assert.strictEqual(result, '<html><body>Gateway Timeout</body></html>');
+  });
+
+  it('should return generic error for empty response', () => {
+    const emptyResponse = '';
+    
+    const result = parseSpotifyErrorResponse(emptyResponse);
+    assert.strictEqual(result, 'Failed to add to queue');
+  });
+
+  it('should return generic error for whitespace-only response', () => {
+    const whitespaceResponse = '   \n\t  ';
+    
+    const result = parseSpotifyErrorResponse(whitespaceResponse);
+    assert.strictEqual(result, 'Failed to add to queue');
+  });
+
+  it('should handle JSON without error.message property', () => {
+    const incompleteJson = JSON.stringify({ status: 500, reason: 'Internal error' });
+    
+    const result = parseSpotifyErrorResponse(incompleteJson);
+    // Falls back to generic message since error.message is not present
+    assert.strictEqual(result, 'Failed to add to queue');
+  });
+
+  it('should trim whitespace from plain text errors', () => {
+    const paddedError = '  Connection refused  \n';
+    
+    const result = parseSpotifyErrorResponse(paddedError);
+    assert.strictEqual(result, 'Connection refused');
+  });
+
+  it('should handle malformed JSON gracefully', () => {
+    const malformedJson = '{"error": {"message": incomplete';
+    
+    const result = parseSpotifyErrorResponse(malformedJson);
+    // Falls back to using the raw text as the error
+    assert.strictEqual(result, '{"error": {"message": incomplete');
+  });
+});
