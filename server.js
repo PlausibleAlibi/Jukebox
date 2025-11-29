@@ -54,6 +54,11 @@ let oauthCallbackServer = null;
 let oauthCallbackPort = null;
 let currentOAuthState = null;
 
+// Get the base URL for the main application server
+function getMainAppBaseUrl() {
+  return `http://127.0.0.1:${PORT}`;
+}
+
 // Get the OAuth redirect URI (dynamic for desktop, static for server deployments)
 function getSpotifyRedirectUri() {
   if (!USE_DYNAMIC_OAUTH_PORT) {
@@ -69,6 +74,7 @@ function getSpotifyRedirectUri() {
 async function startOAuthCallbackServer() {
   return new Promise((resolve, reject) => {
     const callbackApp = express();
+    const mainAppUrl = getMainAppBaseUrl();
     
     callbackApp.get('/callback', async (req, res) => {
       const { code, error, state } = req.query;
@@ -80,12 +86,12 @@ async function startOAuthCallbackServer() {
       }
 
       if (error) {
-        res.redirect(`http://127.0.0.1:${PORT}/?error=${encodeURIComponent(error)}`);
+        res.redirect(`${mainAppUrl}/?error=${encodeURIComponent(error)}`);
         return;
       }
 
       if (!code) {
-        res.redirect(`http://127.0.0.1:${PORT}/?error=no_code`);
+        res.redirect(`${mainAppUrl}/?error=no_code`);
         return;
       }
 
@@ -107,7 +113,7 @@ async function startOAuthCallbackServer() {
         if (!response.ok) {
           const errorData = await response.json();
           console.error('Token exchange error:', errorData);
-          res.redirect(`http://127.0.0.1:${PORT}/?error=token_exchange_failed`);
+          res.redirect(`${mainAppUrl}/?error=token_exchange_failed`);
           return;
         }
 
@@ -117,10 +123,10 @@ async function startOAuthCallbackServer() {
         tokenData.expiresAt = Date.now() + (data.expires_in * 1000);
 
         // Redirect to main app with success
-        res.redirect(`http://127.0.0.1:${PORT}/?authenticated=true`);
+        res.redirect(`${mainAppUrl}/?authenticated=true`);
       } catch (err) {
         console.error('Callback error:', err);
-        res.redirect(`http://127.0.0.1:${PORT}/?error=callback_failed`);
+        res.redirect(`${mainAppUrl}/?error=callback_failed`);
       }
     });
 
