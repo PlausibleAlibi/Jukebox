@@ -81,9 +81,65 @@ ipconfig
 | `SPOTIFY_CLIENT_ID` | Your Spotify app's Client ID | Required |
 | `SPOTIFY_CLIENT_SECRET` | Your Spotify app's Client Secret | Required |
 | `SPOTIFY_REDIRECT_URI` | OAuth callback URL (set only for server deployments) | Dynamic (RFC 8252) |
-| `PORT` | Server port | `3000` |
+| `PORT` | Server port (HTTP mode) | `3000` |
 | `MAX_TRACKS_PER_IP` | Maximum tracks a device can queue | `5` |
 | `ADMIN_PASSWORD` | Password for host admin controls | Empty (disabled) |
+| `SSL_CERT_PATH` | Path to SSL certificate file | Empty (disabled) |
+| `SSL_KEY_PATH` | Path to SSL private key file | Empty (disabled) |
+| `SSL_PORT` | HTTPS server port | `443` |
+| `SSL_HOST` | IP address/hostname to bind for HTTPS | `0.0.0.0` |
+
+### HTTPS/SSL Configuration
+
+Party Jukebox supports secure HTTPS connections for LAN deployments. When both `SSL_CERT_PATH` and `SSL_KEY_PATH` are set, the server runs in HTTPS mode.
+
+#### Generating Certificates with mkcert (Recommended)
+
+[mkcert](https://github.com/FiloSottile/mkcert) is the easiest way to create locally-trusted certificates for your LAN IP:
+
+```bash
+# Install mkcert (on macOS with Homebrew)
+brew install mkcert
+mkcert -install
+
+# Or on Linux
+# See: https://github.com/FiloSottile/mkcert#installation
+
+# Create certificates for your LAN IP (replace with your IP)
+mkdir -p certs
+cd certs
+mkcert 192.168.50.159 localhost
+
+# This creates two files:
+# - 192.168.50.159+1.pem (certificate)
+# - 192.168.50.159+1-key.pem (private key)
+```
+
+#### Configuring HTTPS in .env
+
+```bash
+# SSL/HTTPS Configuration
+SSL_CERT_PATH=./certs/192.168.50.159+1.pem
+SSL_KEY_PATH=./certs/192.168.50.159+1-key.pem
+SSL_PORT=443
+SSL_HOST=192.168.50.159
+```
+
+#### Running with HTTPS
+
+Once configured, start the server and access it via HTTPS:
+
+```bash
+# Start the server (may require sudo for port 443)
+sudo npm start
+
+# Access the app
+# https://192.168.50.159/
+```
+
+> **Note**: Using port 443 typically requires root/administrator privileges. You can use a higher port (e.g., `SSL_PORT=8443`) to avoid this requirement.
+
+> **Note**: The OAuth callback continues to use the HTTP loopback interface for Spotify authentication. This is normal and secure as it only accepts connections from `127.0.0.1`.
 
 ### OAuth Configuration
 
@@ -109,7 +165,7 @@ When `SPOTIFY_REDIRECT_URI` **is set**, the app uses a fixed redirect URI:
 For guests to access the jukebox:
 
 1. Ensure your firewall allows connections on the configured port
-2. Share your local IP address with guests (e.g., `http://192.168.1.100:3000`)
+2. Share your local IP address with guests (e.g., `https://192.168.1.100` or `http://192.168.1.100:3000`)
 
 > **Note**: The OAuth callback always uses the loopback interface (`127.0.0.1`), so guests don't need to be able to reach the OAuth callback port - only the main app port.
 

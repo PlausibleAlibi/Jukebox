@@ -2,12 +2,33 @@ require('dotenv').config();
 const express = require('express');
 const crypto = require('crypto');
 const path = require('path');
+const fs = require('fs');
 const http = require('http');
+const https = require('https');
 const rateLimit = require('express-rate-limit');
 const QRCode = require('qrcode');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// SSL/HTTPS configuration
+const SSL_CERT_PATH = process.env.SSL_CERT_PATH || '';
+const SSL_KEY_PATH = process.env.SSL_KEY_PATH || '';
+const SSL_PORT = parseInt(process.env.SSL_PORT, 10) || 443;
+const SSL_HOST = process.env.SSL_HOST || '0.0.0.0';
+const USE_HTTPS = !!(SSL_CERT_PATH && SSL_KEY_PATH);
+
+// Validate SSL configuration
+if (USE_HTTPS) {
+  if (!fs.existsSync(SSL_CERT_PATH)) {
+    console.error(`❌ SSL certificate file not found: ${SSL_CERT_PATH}`);
+    process.exit(1);
+  }
+  if (!fs.existsSync(SSL_KEY_PATH)) {
+    console.error(`❌ SSL key file not found: ${SSL_KEY_PATH}`);
+    process.exit(1);
+  }
+}
 
 // Party configuration
 const MAX_TRACKS_PER_IP = parseInt(process.env.MAX_TRACKS_PER_IP, 10) || 5;
@@ -56,6 +77,7 @@ let currentOAuthState = null;
 
 // Get the base URL for the main application server
 function getMainAppBaseUrl() {
+  // OAuth callback always uses the loopback interface, not the SSL host
   return `http://127.0.0.1:${PORT}`;
 }
 
@@ -731,24 +753,52 @@ app.get('/api/oauth-config', (req, res) => {
 });
 
 // Start server
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🎵 Party Jukebox running at http://localhost:${PORT}`);
-  console.log(`   LAN access: http://<your-local-ip>:${PORT}`);
+if (USE_HTTPS) {
+  // HTTPS server
+  const sslOptions = {
+    key: fs.readFileSync(SSL_KEY_PATH),
+    cert: fs.readFileSync(SSL_CERT_PATH)
+  };
   
-  if (!SPOTIFY_CLIENT_ID || !SPOTIFY_CLIENT_SECRET) {
-    console.log('\n⚠️  Warning: Spotify credentials not configured!');
-    console.log('   Set SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET environment variables.');
-  }
-  
-  if (USE_DYNAMIC_OAUTH_PORT) {
-    console.log('\n🔐 OAuth Mode: Dynamic loopback port (RFC 8252 compliant)');
-    console.log('   Redirect URI will be assigned when OAuth flow starts');
-    console.log('   Ensure your Spotify app allows any port on http://127.0.0.1/callback');
-  } else {
-    console.log(`\n🔐 OAuth Mode: Static redirect URI`);
-    console.log(`   Redirect URI: ${process.env.SPOTIFY_REDIRECT_URI}`);
-  }
-});
+  https.createServer(sslOptions, app).listen(SSL_PORT, SSL_HOST, () => {
+    console.log(`🎵 Party Jukebox running at https://${SSL_HOST}:${SSL_PORT}`);
+    console.log(`   Secure LAN access: https://${SSL_HOST}:${SSL_PORT}`);
+    
+    if (!SPOTIFY_CLIENT_ID || !SPOTIFY_CLIENT_SECRET) {
+      console.log('\n⚠️  Warning: Spotify credentials not configured!');
+      console.log('   Set SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET environment variables.');
+    }
+    
+    if (USE_DYNAMIC_OAUTH_PORT) {
+      console.log('\n🔐 OAuth Mode: Dynamic loopback port (RFC 8252 compliant)');
+      console.log('   Redirect URI will be assigned when OAuth flow starts');
+      console.log('   Ensure your Spotify app allows any port on http://127.0.0.1/callback');
+    } else {
+      console.log(`\n🔐 OAuth Mode: Static redirect URI`);
+      console.log(`   Redirect URI: ${process.env.SPOTIFY_REDIRECT_URI}`);
+    }
+  });
+} else {
+  // HTTP server (default)
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`🎵 Party Jukebox running at http://localhost:${PORT}`);
+    console.log(`   LAN access: http://<your-local-ip>:${PORT}`);
+    
+    if (!SPOTIFY_CLIENT_ID || !SPOTIFY_CLIENT_SECRET) {
+      console.log('\n⚠️  Warning: Spotify credentials not configured!');
+      console.log('   Set SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET environment variables.');
+    }
+    
+    if (USE_DYNAMIC_OAUTH_PORT) {
+      console.log('\n🔐 OAuth Mode: Dynamic loopback port (RFC 8252 compliant)');
+      console.log('   Redirect URI will be assigned when OAuth flow starts');
+      console.log('   Ensure your Spotify app allows any port on http://127.0.0.1/callback');
+    } else {
+      console.log(`\n🔐 OAuth Mode: Static redirect URI`);
+      console.log(`   Redirect URI: ${process.env.SPOTIFY_REDIRECT_URI}`);
+    }
+  });
+}
 
 // Export for testing
 module.exports = {
@@ -756,5 +806,6 @@ module.exports = {
   startOAuthCallbackServer,
   stopOAuthCallbackServer,
   getSpotifyRedirectUri,
-  USE_DYNAMIC_OAUTH_PORT
+  USE_DYNAMIC_OAUTH_PORT,
+  USE_HTTPS
 };

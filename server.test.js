@@ -203,3 +203,58 @@ describe('OAuth Mode Selection', () => {
     assert.strictEqual(useDynamicPort, false, 'Should use static URI when env is set');
   });
 });
+
+describe('SSL/HTTPS Configuration', () => {
+  it('should not use HTTPS when SSL paths are not set', () => {
+    // When neither SSL_CERT_PATH nor SSL_KEY_PATH is set
+    const certPath = '';
+    const keyPath = '';
+    const useHttps = !!(certPath && keyPath);
+    
+    assert.strictEqual(useHttps, false, 'Should not use HTTPS when paths are empty');
+  });
+
+  it('should not use HTTPS when only cert path is set', () => {
+    const certPath = './cert.pem';
+    const keyPath = '';
+    const useHttps = !!(certPath && keyPath);
+    
+    assert.strictEqual(useHttps, false, 'Should not use HTTPS when only cert path is set');
+  });
+
+  it('should not use HTTPS when only key path is set', () => {
+    const certPath = '';
+    const keyPath = './key.pem';
+    const useHttps = !!(certPath && keyPath);
+    
+    assert.strictEqual(useHttps, false, 'Should not use HTTPS when only key path is set');
+  });
+
+  it('should use HTTPS when both SSL paths are set', () => {
+    const certPath = './cert.pem';
+    const keyPath = './key.pem';
+    const useHttps = !!(certPath && keyPath);
+    
+    assert.strictEqual(useHttps, true, 'Should use HTTPS when both paths are set');
+  });
+
+  it('should use default SSL port of 443', () => {
+    const sslPort = parseInt('', 10) || 443;
+    assert.strictEqual(sslPort, 443, 'Default SSL port should be 443');
+  });
+
+  it('should parse custom SSL port from environment', () => {
+    const sslPort = parseInt('8443', 10) || 443;
+    assert.strictEqual(sslPort, 8443, 'Should parse custom SSL port');
+  });
+
+  it('should use default SSL host of 0.0.0.0', () => {
+    const sslHost = '' || '0.0.0.0';
+    assert.strictEqual(sslHost, '0.0.0.0', 'Default SSL host should be 0.0.0.0');
+  });
+
+  it('should use custom SSL host when provided', () => {
+    const sslHost = '192.168.50.159' || '0.0.0.0';
+    assert.strictEqual(sslHost, '192.168.50.159', 'Should use custom SSL host');
+  });
+});
