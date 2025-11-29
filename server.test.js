@@ -263,13 +263,15 @@ describe('SSL/HTTPS Configuration', () => {
 
 describe('Spotify API Error Parsing', () => {
   /**
-   * Helper function to parse Spotify error responses.
-   * This mirrors the error parsing logic in POST /api/queue.
-   * Spotify may return non-JSON error responses (e.g., plain strings).
-   * First read as text, then try to parse as JSON. Fall back to the text or generic message.
+   * Helper function to parse Spotify error responses for testing.
+   * This mirrors the parseSpotifyErrorResponse function in server.js which is used
+   * across all Spotify API endpoints to handle non-JSON error responses.
+   * @param {string} responseText - The response body text
+   * @param {string} fallbackMessage - The fallback error message if parsing fails
+   * @returns {string} The parsed error message
    */
-  function parseSpotifyErrorResponse(responseText) {
-    let errorMessage = 'Failed to add to queue';
+  function parseSpotifyErrorResponse(responseText, fallbackMessage = 'Failed to add to queue') {
+    let errorMessage = fallbackMessage;
     if (responseText && responseText.trim()) {
       try {
         // Try to parse as JSON
@@ -346,5 +348,12 @@ describe('Spotify API Error Parsing', () => {
     const result = parseSpotifyErrorResponse(malformedJson);
     // Falls back to using the raw text as the error
     assert.strictEqual(result, '{"error": {"message": incomplete');
+  });
+
+  it('should use custom fallback message for empty response', () => {
+    const emptyResponse = '';
+    
+    const result = parseSpotifyErrorResponse(emptyResponse, 'Search failed');
+    assert.strictEqual(result, 'Search failed');
   });
 });

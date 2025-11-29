@@ -125,8 +125,8 @@ async function exchangeCodeForTokens(code, redirectUri) {
     });
 
     if (!response.ok) {
-      const errorData = await response.json();
-      logger.error('OAuth token exchange failed', { error: errorData });
+      const errorMessage = await parseSpotifyErrorResponse(response, 'Token exchange failed');
+      logger.error('OAuth token exchange failed', { error: errorMessage });
       return { success: false, error: 'token_exchange_failed' };
     }
 
@@ -237,6 +237,36 @@ async function spotifyFetch(endpoint, options = {}) {
     }
   });
   return response;
+}
+
+/**
+ * Parse error response from Spotify API.
+ * Spotify may return non-JSON error responses (e.g., plain strings).
+ * First read as text, then try to parse as JSON. Fall back to the text or generic message.
+ * @param {Response} response - The fetch Response object
+ * @param {string} fallbackMessage - The fallback error message if parsing fails
+ * @returns {Promise<string>} The parsed error message
+ */
+async function parseSpotifyErrorResponse(response, fallbackMessage) {
+  let errorMessage = fallbackMessage;
+  try {
+    const responseText = await response.text();
+    if (responseText && responseText.trim()) {
+      try {
+        // Try to parse as JSON
+        const errorData = JSON.parse(responseText);
+        if (errorData.error?.message) {
+          errorMessage = errorData.error.message;
+        }
+      } catch {
+        // Not valid JSON, use the raw text as the error message
+        errorMessage = responseText.trim();
+      }
+    }
+  } catch {
+    // Failed to read response body, use the fallback error message
+  }
+  return errorMessage;
 }
 
 // Check if host is authenticated
@@ -423,8 +453,8 @@ app.get('/api/search', ensureToken, async (req, res) => {
     const response = await spotifyFetch(`/search?type=track&limit=20&q=${encodeURIComponent(q)}`);
 
     if (!response.ok) {
-      const errorData = await response.json();
-      return res.status(response.status).json({ error: errorData.error?.message || 'Search failed' });
+      const errorMessage = await parseSpotifyErrorResponse(response, 'Search failed');
+      return res.status(response.status).json({ error: errorMessage });
     }
 
     const data = await response.json();
@@ -501,26 +531,7 @@ app.post('/api/queue', ensureToken, async (req, res) => {
       return res.status(404).json({ error: 'No active device found. Please start playing on Spotify first.' });
     }
 
-    // Spotify may return non-JSON error responses (e.g., plain strings).
-    // First read as text, then try to parse as JSON. Fall back to the text or generic message.
-    let errorMessage = 'Failed to add to queue';
-    try {
-      const responseText = await response.text();
-      if (responseText && responseText.trim()) {
-        try {
-          // Try to parse as JSON
-          const errorData = JSON.parse(responseText);
-          if (errorData.error?.message) {
-            errorMessage = errorData.error.message;
-          }
-        } catch {
-          // Not valid JSON, use the raw text as the error message
-          errorMessage = responseText.trim();
-        }
-      }
-    } catch {
-      // Failed to read response body, use the generic error message
-    }
+    const errorMessage = await parseSpotifyErrorResponse(response, 'Failed to add to queue');
     return res.status(response.status).json({ error: errorMessage });
   } catch (err) {
     logger.error('Spotify queue error', { error: err.message, uri, clientIP });
@@ -676,8 +687,8 @@ app.post('/api/admin/skip', requireAdmin, ensureToken, async (req, res) => {
       return res.status(404).json({ error: 'No active device found' });
     }
 
-    const errorData = await response.json();
-    return res.status(response.status).json({ error: errorData.error?.message || 'Failed to skip track' });
+    const errorMessage = await parseSpotifyErrorResponse(response, 'Failed to skip track');
+    return res.status(response.status).json({ error: errorMessage });
   } catch (err) {
     logger.error('Admin skip track error', { error: err.message, ip: getClientIP(req) });
     res.status(500).json({ error: 'Failed to skip track' });
@@ -744,8 +755,8 @@ app.post('/api/admin/pause', requireAdmin, ensureToken, async (req, res) => {
       return res.status(404).json({ error: 'No active device found' });
     }
 
-    const errorData = await response.json();
-    return res.status(response.status).json({ error: errorData.error?.message || 'Failed to pause' });
+    const errorMessage = await parseSpotifyErrorResponse(response, 'Failed to pause');
+    return res.status(response.status).json({ error: errorMessage });
   } catch (err) {
     logger.error('Admin pause playback error', { error: err.message, ip: getClientIP(req) });
     res.status(500).json({ error: 'Failed to pause playback' });
@@ -768,8 +779,8 @@ app.post('/api/admin/play', requireAdmin, ensureToken, async (req, res) => {
       return res.status(404).json({ error: 'No active device found' });
     }
 
-    const errorData = await response.json();
-    return res.status(response.status).json({ error: errorData.error?.message || 'Failed to resume' });
+    const errorMessage = await parseSpotifyErrorResponse(response, 'Failed to resume');
+    return res.status(response.status).json({ error: errorMessage });
   } catch (err) {
     logger.error('Admin resume playback error', { error: err.message, ip: getClientIP(req) });
     res.status(500).json({ error: 'Failed to resume playback' });
