@@ -11,6 +11,9 @@
 #    SSL_CERT_PATH=./certs/your-cert.pem
 #    SSL_KEY_PATH=./certs/your-key.pem
 #    SSL_PORT=443
+# 3. Create logs directory with proper permissions:
+#    mkdir -p logs && sudo chown 1001:1001 logs
+#    (Or use chmod 775 logs if you cannot use sudo)
 #
 # Certificate Generation with mkcert (recommended):
 #   mkdir -p certs
@@ -27,6 +30,12 @@
 # - Port 443 requires root/elevated privileges on most systems
 # - If you cannot bind to 443, use a higher port (e.g., 8443:443) and update SSL_PORT in .env
 # - Ensure no other service (nginx, apache, etc.) is using port 443
+#
+# Troubleshooting Logs:
+# - The container runs as user 'jukebox' (UID 1001) for security
+# - Ensure the logs directory is writable: mkdir -p logs && sudo chown 1001:1001 logs
+# - Or use: mkdir -p logs && chmod 775 logs
+# - See README.md for more details on log directory permissions
 #
 # For development/HTTP-only mode:
 # - Remove SSL_CERT_PATH and SSL_KEY_PATH from .env

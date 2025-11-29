@@ -296,15 +296,19 @@ cd certs
 mkcert 192.168.x.x localhost  # Replace with your LAN IP
 cd ..
 
-# 2. Configure environment
+# 2. Create logs directory with proper permissions
+mkdir -p logs && sudo chown 1001:1001 logs
+# Or if sudo is unavailable: chmod 775 logs
+
+# 3. Configure environment
 cp .env.example .env
 # Edit .env: set SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET
 # Update SSL_CERT_PATH and SSL_KEY_PATH with your certificate filenames
 
-# 3. Start the container
+# 4. Start the container
 ./docker-start.sh
 
-# 4. Access the app
+# 5. Access the app
 # https://192.168.x.x/ (replace with your LAN IP)
 ```
 
@@ -369,6 +373,51 @@ The Docker healthcheck probes `https://localhost:443/api/status` using wget with
 - **Port 443 binding fails**: Port 443 requires root privileges. Either run Docker as root or use a higher port mapping (e.g., `8443:443` in docker-compose.yml)
 - **Certificate not found**: Ensure the `certs/` directory contains your certificates and is mounted correctly
 - **Healthcheck failing**: Verify SSL_CERT_PATH and SSL_KEY_PATH point to valid certificates inside `/app/certs/`
+
+#### Troubleshooting Docker Logs
+
+The container runs as a non-root user (`jukebox`, UID 1001) for security. Log files are persisted to the host's `./logs` directory via volume mount.
+
+**Log directory permission issues:**
+
+If logs are not being written or you see permission errors:
+
+```bash
+# Recommended: Set ownership to match the container user (UID 1001)
+mkdir -p logs && sudo chown 1001:1001 logs
+
+# Alternative: Make directory group-writable (less secure)
+mkdir -p logs && chmod 775 logs
+```
+
+**Common symptoms:**
+- Container exits immediately with permission errors
+- No log files appearing in `./logs` directory
+- Application errors about "EACCES: permission denied"
+
+**Why this happens:**
+- When a host directory is mounted into the container, the container user needs write permissions
+- The container's `jukebox` user (UID 1001) may not match your host user's UID
+- Setting ownership to UID 1001 is the most secure approach
+- Using `chmod 775` allows group write access as a fallback
+
+**Using docker-compose:**
+```bash
+# Before first run (recommended)
+mkdir -p logs && sudo chown 1001:1001 logs
+
+# Then start the container
+docker-compose up -d
+```
+
+**Using docker run directly:**
+```bash
+# Before first run (recommended)
+mkdir -p logs && sudo chown 1001:1001 logs
+
+# Then start with the script
+./docker-start.sh
+```
 
 ### Update and Restart Script
 
