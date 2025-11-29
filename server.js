@@ -9,7 +9,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Party configuration
-const MAX_TRACKS_PER_IP = parseInt(process.env.MAX_TRACKS_PER_IP) || 5;
+const MAX_TRACKS_PER_IP = parseInt(process.env.MAX_TRACKS_PER_IP, 10) || 5;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
 
 // Rate limiting configuration
@@ -38,6 +38,8 @@ let partyQueue = [];
 let ipTrackCount = {};
 // Votes per track: { trackId: Set of IP addresses }
 let trackVotes = {};
+// Admin session tokens (simple session management)
+let adminSessions = new Set();
 
 // Spotify configuration
 const SPOTIFY_CLIENT_ID = process.env.SPOTIFY_CLIENT_ID;
@@ -51,6 +53,11 @@ function getClientIP(req) {
          req.connection?.remoteAddress ||
          req.socket?.remoteAddress ||
          'unknown';
+}
+
+// Generate admin session token
+function generateAdminToken() {
+  return crypto.randomBytes(32).toString('hex');
 }
 
 // Middleware
@@ -294,8 +301,10 @@ app.post('/api/queue', ensureToken, async (req, res) => {
       ipTrackCount[clientIP] = currentCount + 1;
       
       // Add to party queue for voting display
-      const trackId = uri.split(':').pop();
-      if (!partyQueue.find(t => t.id === trackId)) {
+      // Extract track ID from Spotify URI (format: spotify:track:XXXXX)
+      const uriParts = uri.split(':');
+      const trackId = uriParts.length >= 3 ? uriParts[2] : uri;
+      if (trackId && !partyQueue.find(t => t.id === trackId)) {
         partyQueue.push({
           id: trackId,
           uri,
@@ -428,8 +437,8 @@ function requireAdmin(req, res, next) {
   }
   
   const token = authHeader.substring(7);
-  if (token !== ADMIN_PASSWORD) {
-    return res.status(403).json({ error: 'Invalid admin credentials' });
+  if (!adminSessions.has(token)) {
+    return res.status(403).json({ error: 'Invalid or expired admin session' });
   }
   
   next();
@@ -449,7 +458,9 @@ app.post('/api/admin/login', authLimiter, (req, res) => {
   }
   
   if (password === ADMIN_PASSWORD) {
-    return res.json({ success: true, token: ADMIN_PASSWORD });
+    const token = generateAdminToken();
+    adminSessions.add(token);
+    return res.json({ success: true, token });
   }
   
   res.status(403).json({ error: 'Invalid password' });
@@ -502,7 +513,7 @@ app.delete('/api/admin/queue', requireAdmin, (req, res) => {
 
 // Admin: Reset track limits for an IP or all
 app.post('/api/admin/reset-limits', requireAdmin, (req, res) => {
-  const { ip } = req.body;
+  const ip = req.body?.ip;
   
   if (ip) {
     delete ipTrackCount[ip];

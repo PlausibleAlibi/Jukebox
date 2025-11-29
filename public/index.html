@@ -212,7 +212,7 @@
 
   <script>
     // State
-    let adminToken = localStorage.getItem('adminToken') || '';
+    let adminToken = sessionStorage.getItem('adminToken') || '';
     let trackLimit = { used: 0, remaining: 5, max: 5 };
 
     // Elements
@@ -339,9 +339,13 @@
           return;
         }
 
+        // Store track data for safe access
+        window.trackData = {};
+        data.tracks.forEach(track => {
+          window.trackData[track.id] = track;
+        });
+
         results.innerHTML = data.tracks.map(track => {
-          const escapedName = escapeHtml(track.name).replace(/'/g, "\\'");
-          const escapedArtist = escapeHtml(track.artist).replace(/'/g, "\\'");
           return `
           <div class="track-card">
             <img class="track-art" src="${track.albumArt || 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect fill=%22%23333%22 width=%22100%22 height=%22100%22/><text x=%2250%22 y=%2255%22 text-anchor=%22middle%22 fill=%22%23666%22 font-size=%2240%22>♪</text></svg>'}" alt="${escapeHtml(track.album)}" loading="lazy">
@@ -350,9 +354,20 @@
               <div class="track-artist">${escapeHtml(track.artist)}</div>
               <div class="track-album">${escapeHtml(track.album)}</div>
             </div>
-            <button class="add-btn" onclick="addToQueue('${track.uri}', '${escapedName}', '${escapedArtist}', '${track.albumArt || ''}', this)" ${trackLimit.remaining <= 0 ? 'disabled' : ''}>Add</button>
+            <button class="add-btn" data-track-id="${escapeHtml(track.id)}" ${trackLimit.remaining <= 0 ? 'disabled' : ''}>Add</button>
           </div>
         `}).join('');
+
+        // Add event listeners safely
+        results.querySelectorAll('.add-btn').forEach(btn => {
+          btn.addEventListener('click', function() {
+            const trackId = this.dataset.trackId;
+            const track = window.trackData[trackId];
+            if (track) {
+              addToQueue(track.uri, track.name, track.artist, track.albumArt, this);
+            }
+          });
+        });
       } catch (err) {
         results.innerHTML = '<div class="message">' + escapeHtml(err.message) + '</div>';
       } finally {
@@ -494,7 +509,7 @@
         if (!response.ok) throw new Error(data.error || 'Login failed');
 
         adminToken = data.token;
-        localStorage.setItem('adminToken', adminToken);
+        sessionStorage.setItem('adminToken', adminToken);
         document.getElementById('adminPassword').value = '';
         checkAdminStatus();
         showToast('Admin login successful!');
@@ -505,7 +520,7 @@
 
     function adminLogout() {
       adminToken = '';
-      localStorage.removeItem('adminToken');
+      sessionStorage.removeItem('adminToken');
       checkAdminStatus();
     }
 

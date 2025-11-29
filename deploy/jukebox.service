@@ -26,8 +26,8 @@ ProtectHome=true
 PrivateTmp=true
 ReadWritePaths=/opt/jukebox
 
-# Resource limits
-MemoryMax=256M
+# Resource limits (512M recommended for Node.js with dependencies)
+MemoryMax=512M
 CPUQuota=50%
 
 # Logging
