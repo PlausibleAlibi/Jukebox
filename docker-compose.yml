@@ -12,7 +12,8 @@
 #    SSL_KEY_PATH=./certs/your-key.pem
 #    SSL_PORT=443
 # 3. Create logs directory with proper permissions:
-#    mkdir -p logs && chmod 777 logs
+#    mkdir -p logs && sudo chown 1001:1001 logs
+#    (Or use chmod 775 logs if you cannot use sudo)
 #
 # Certificate Generation with mkcert (recommended):
 #   mkdir -p certs
@@ -32,7 +33,8 @@
 #
 # Troubleshooting Logs:
 # - The container runs as user 'jukebox' (UID 1001) for security
-# - Ensure the logs directory is writable: mkdir -p logs && chmod 777 logs
+# - Ensure the logs directory is writable: mkdir -p logs && sudo chown 1001:1001 logs
+# - Or use: mkdir -p logs && chmod 775 logs
 # - See README.md for more details on log directory permissions
 #
 # For development/HTTP-only mode:

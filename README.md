@@ -297,7 +297,8 @@ mkcert 192.168.x.x localhost  # Replace with your LAN IP
 cd ..
 
 # 2. Create logs directory with proper permissions
-mkdir -p logs && chmod 777 logs
+mkdir -p logs && sudo chown 1001:1001 logs
+# Or if sudo is unavailable: chmod 775 logs
 
 # 3. Configure environment
 cp .env.example .env
@@ -382,11 +383,11 @@ The container runs as a non-root user (`jukebox`, UID 1001) for security. Log fi
 If logs are not being written or you see permission errors:
 
 ```bash
-# Create the logs directory with proper permissions
-mkdir -p logs && chmod 777 logs
-
-# Or set ownership to match the container user (UID 1001)
+# Recommended: Set ownership to match the container user (UID 1001)
 mkdir -p logs && sudo chown 1001:1001 logs
+
+# Alternative: Make directory group-writable (less secure)
+mkdir -p logs && chmod 775 logs
 ```
 
 **Common symptoms:**
@@ -397,13 +398,13 @@ mkdir -p logs && sudo chown 1001:1001 logs
 **Why this happens:**
 - When a host directory is mounted into the container, the container user needs write permissions
 - The container's `jukebox` user (UID 1001) may not match your host user's UID
-- Using `chmod 777` makes the directory world-writable, which works in development
-- For production, consider matching the container UID to your host user or using named volumes
+- Setting ownership to UID 1001 is the most secure approach
+- Using `chmod 775` allows group write access as a fallback
 
 **Using docker-compose:**
 ```bash
-# Before first run
-mkdir -p logs && chmod 777 logs
+# Before first run (recommended)
+mkdir -p logs && sudo chown 1001:1001 logs
 
 # Then start the container
 docker-compose up -d
@@ -411,8 +412,8 @@ docker-compose up -d
 
 **Using docker run directly:**
 ```bash
-# Before first run
-mkdir -p logs && chmod 777 logs
+# Before first run (recommended)
+mkdir -p logs && sudo chown 1001:1001 logs
 
 # Then start with the script
 ./docker-start.sh

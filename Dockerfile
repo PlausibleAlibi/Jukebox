@@ -16,9 +16,9 @@
 # Log Directory Permissions:
 # The container runs as a non-root user 'jukebox' (UID 1001) for security.
 # Before running, ensure the host logs directory is writable:
-#   mkdir -p logs && chmod 777 logs
-# Or match the container user:
 #   mkdir -p logs && sudo chown 1001:1001 logs
+# Alternative (less secure):
+#   mkdir -p logs && chmod 775 logs
 
 FROM node:20-alpine
 

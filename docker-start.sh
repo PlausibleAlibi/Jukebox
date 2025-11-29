@@ -56,8 +56,16 @@ fi
 
 # Ensure logs directory is writable by the container's non-root user (UID 1001)
 # This is needed because the container runs as the 'jukebox' user (UID 1001)
+# Try to set ownership to match container user first, fallback to group-writable
 echo "Ensuring logs/ directory has proper permissions..."
-chmod 777 logs 2>/dev/null || echo "Note: Could not set permissions on logs/. You may need to run: chmod 777 logs"
+if chown 1001:1001 logs 2>/dev/null; then
+    chmod 755 logs 2>/dev/null
+    echo "  Set ownership to UID 1001 (container user)"
+elif chmod 775 logs 2>/dev/null; then
+    echo "  Set group-writable permissions"
+else
+    echo "Note: Could not set permissions on logs/. You may need to run: sudo chown 1001:1001 logs"
+fi
 
 # Check if container is already running
 if docker ps --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
