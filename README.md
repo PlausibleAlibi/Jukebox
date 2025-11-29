@@ -291,6 +291,65 @@ pm2 save
 docker-compose up -d
 ```
 
+### Update and Restart Script
+
+A Bash script (`update_and_restart.sh`) is provided to automate pulling the latest code and restarting the jukebox service.
+
+#### Usage
+
+```bash
+# Make the script executable (first time only)
+chmod +x update_and_restart.sh
+
+# Run the script (requires sudo for service restart)
+sudo ./update_and_restart.sh
+```
+
+#### What the Script Does
+
+1. **Pulls latest code** from the remote Git repository
+2. **Updates `LAST_UPDATED.txt`** with the current timestamp (UTC)
+3. **Restarts the jukebox systemd service**
+
+#### Configuration
+
+Edit the variables at the top of `update_and_restart.sh` to customize:
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `REPO_DIR` | Path to the jukebox repository | `/opt/jukebox` |
+| `SERVICE_NAME` | Name of the systemd service | `jukebox` |
+
+#### Requirements
+
+- **Git** must be installed and configured
+- **systemd** service must be set up (see `deploy/jukebox.service`)
+- Script must be run with sufficient permissions to restart the service (typically via `sudo`)
+
+#### Example Output
+
+```
+========================================
+Party Jukebox Update and Restart Script
+========================================
+
+[1/4] Navigating to repository directory: /opt/jukebox
+      Current directory: /opt/jukebox
+
+[2/4] Pulling latest code from remote repository...
+      Code updated successfully.
+
+[3/4] Updating LAST_UPDATED.txt...
+      Timestamp written: 2025-01-15 14:30:45 UTC
+
+[4/4] Restarting jukebox service...
+      Service restarted successfully.
+
+========================================
+Update and restart completed successfully!
+========================================
+```
+
 ### HTTPS Setup
 
 #### Option 1: Let's Encrypt (recommended for public domains)
