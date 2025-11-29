@@ -310,12 +310,12 @@ cp .env.example .env
 
 #### Docker Start/Stop Scripts
 
-Convenience scripts are provided for managing the Docker container:
+Convenience scripts are provided for managing the Docker container. These scripts handle port mapping, environment loading, and volume mounts automatically.
 
 | Script | Description |
 |--------|-------------|
-| `./docker-start.sh` | Start the Party Jukebox container (checks for .env and certs) |
-| `./docker-stop.sh` | Stop the Party Jukebox container |
+| `./docker-start.sh` | Build and start the container with all volume mounts (.env, certs, logs) |
+| `./docker-stop.sh` | Stop and remove the container (logs are preserved) |
 
 ```bash
 # Start the container
@@ -324,11 +324,24 @@ Convenience scripts are provided for managing the Docker container:
 # Stop the container
 ./docker-stop.sh
 
+# View logs
+docker logs -f jukebox
+
 # Or use docker-compose directly
 docker-compose up -d    # Start
 docker-compose down     # Stop
 docker-compose logs -f  # View logs
 ```
+
+#### Docker Volume Mounts
+
+The Docker scripts automatically mount the following directories:
+
+| Host Path | Container Path | Description |
+|-----------|----------------|-------------|
+| `./.env` | `/app/.env` | Environment configuration (via --env-file) |
+| `./certs/` | `/app/certs/` | SSL certificates (read-only) |
+| `./logs/` | `/app/logs/` | Application logs (persistent) |
 
 #### Docker HTTPS Configuration
 

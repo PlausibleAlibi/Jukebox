@@ -1,6 +1,6 @@
 # Party Jukebox Dockerfile
 # Build: docker build -t jukebox .
-# Run: docker run -p 443:443 --env-file .env -v ./certs:/app/certs:ro jukebox
+# Run: docker run -p 443:443 --env-file .env -v ./certs:/app/certs:ro -v ./logs:/app/logs jukebox
 #
 # HTTPS Configuration:
 # This container runs on HTTPS port 443 by default.
@@ -8,6 +8,10 @@
 #   SSL_CERT_PATH=/app/certs/your-cert.pem
 #   SSL_KEY_PATH=/app/certs/your-key.pem
 #   SSL_PORT=443
+#
+# Volume Mounts:
+#   - ./certs:/app/certs:ro  - SSL certificates (read-only)
+#   - ./logs:/app/logs       - Application logs (persistent)
 
 FROM node:20-alpine
 
