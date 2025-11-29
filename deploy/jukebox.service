@@ -1,0 +1,39 @@
+# Party Jukebox systemd service file
+# Copy this file to /etc/systemd/system/jukebox.service
+# Then run: sudo systemctl daemon-reload && sudo systemctl enable jukebox && sudo systemctl start jukebox
+
+[Unit]
+Description=Party Jukebox - Collaborative Spotify Queue
+Documentation=https://github.com/your-repo/jukebox
+After=network.target
+
+[Service]
+Type=simple
+User=jukebox
+Group=jukebox
+WorkingDirectory=/opt/jukebox
+ExecStart=/usr/bin/node server.js
+Restart=on-failure
+RestartSec=10
+
+# Environment file containing Spotify credentials
+EnvironmentFile=/opt/jukebox/.env
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/jukebox
+
+# Resource limits
+MemoryMax=256M
+CPUQuota=50%
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=jukebox
+
+[Install]
+WantedBy=multi-user.target

@@ -3,9 +3,14 @@ const express = require('express');
 const crypto = require('crypto');
 const path = require('path');
 const rateLimit = require('express-rate-limit');
+const QRCode = require('qrcode');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Party configuration
+const MAX_TRACKS_PER_IP = parseInt(process.env.MAX_TRACKS_PER_IP) || 5;
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
 
 // Rate limiting configuration
 const generalLimiter = rateLimit({
@@ -27,10 +32,26 @@ let tokenData = {
   expiresAt: null
 };
 
+// Party queue with voting system
+let partyQueue = [];
+// Track submissions per IP: { ip: count }
+let ipTrackCount = {};
+// Votes per track: { trackId: Set of IP addresses }
+let trackVotes = {};
+
 // Spotify configuration
 const SPOTIFY_CLIENT_ID = process.env.SPOTIFY_CLIENT_ID;
 const SPOTIFY_CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET;
 const SPOTIFY_REDIRECT_URI = process.env.SPOTIFY_REDIRECT_URI || `http://localhost:${PORT}/callback`;
+
+// Get client IP address
+function getClientIP(req) {
+  return req.headers['x-forwarded-for']?.split(',')[0]?.trim() ||
+         req.headers['x-real-ip'] ||
+         req.connection?.remoteAddress ||
+         req.socket?.remoteAddress ||
+         'unknown';
+}
 
 // Middleware
 app.use(express.json());
@@ -118,6 +139,34 @@ app.get('/api/status', (req, res) => {
     authenticated: isAuthenticated(),
     configured: !!(SPOTIFY_CLIENT_ID && SPOTIFY_CLIENT_SECRET)
   });
+});
+
+// Generate QR code for sharing the app URL
+app.get('/api/qrcode', async (req, res) => {
+  try {
+    // Determine the URL to encode
+    let url = req.query.url;
+    if (!url) {
+      // Auto-detect the URL from the request
+      const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'http';
+      const host = req.headers['x-forwarded-host'] || req.headers.host;
+      url = `${protocol}://${host}`;
+    }
+    
+    const qrDataUrl = await QRCode.toDataURL(url, {
+      width: 256,
+      margin: 2,
+      color: {
+        dark: '#1DB954',  // Spotify green
+        light: '#1a1a2e'  // Dark background
+      }
+    });
+    
+    res.json({ qrcode: qrDataUrl, url });
+  } catch (err) {
+    console.error('QR code generation error:', err);
+    res.status(500).json({ error: 'Failed to generate QR code' });
+  }
 });
 
 // Spotify OAuth login
@@ -219,10 +268,20 @@ app.get('/api/search', ensureToken, async (req, res) => {
 
 // Add track to queue
 app.post('/api/queue', ensureToken, async (req, res) => {
-  const { uri } = req.body;
+  const { uri, name, artist, albumArt } = req.body;
+  const clientIP = getClientIP(req);
 
   if (!uri) {
     return res.status(400).json({ error: 'Track URI is required' });
+  }
+
+  // Check track limit per IP
+  const currentCount = ipTrackCount[clientIP] || 0;
+  if (currentCount >= MAX_TRACKS_PER_IP) {
+    return res.status(429).json({ 
+      error: `Track limit reached. You can only add ${MAX_TRACKS_PER_IP} tracks.`,
+      remaining: 0
+    });
   }
 
   try {
@@ -231,7 +290,30 @@ app.post('/api/queue', ensureToken, async (req, res) => {
     });
 
     if (response.status === 204) {
-      return res.json({ success: true, message: 'Track added to queue' });
+      // Track submission count
+      ipTrackCount[clientIP] = currentCount + 1;
+      
+      // Add to party queue for voting display
+      const trackId = uri.split(':').pop();
+      if (!partyQueue.find(t => t.id === trackId)) {
+        partyQueue.push({
+          id: trackId,
+          uri,
+          name: name || 'Unknown',
+          artist: artist || 'Unknown',
+          albumArt: albumArt || null,
+          addedBy: clientIP,
+          addedAt: Date.now(),
+          votes: 0
+        });
+        trackVotes[trackId] = new Set();
+      }
+      
+      return res.json({ 
+        success: true, 
+        message: 'Track added to queue',
+        remaining: MAX_TRACKS_PER_IP - (currentCount + 1)
+      });
     }
 
     if (response.status === 404) {
@@ -244,6 +326,59 @@ app.post('/api/queue', ensureToken, async (req, res) => {
     console.error('Queue error:', err);
     res.status(500).json({ error: 'Failed to add track to queue' });
   }
+});
+
+// Get party queue with votes
+app.get('/api/party-queue', (req, res) => {
+  const clientIP = getClientIP(req);
+  const sortedQueue = [...partyQueue].sort((a, b) => b.votes - a.votes);
+  
+  res.json({
+    queue: sortedQueue.map(track => ({
+      ...track,
+      hasVoted: trackVotes[track.id]?.has(clientIP) || false
+    })),
+    remaining: MAX_TRACKS_PER_IP - (ipTrackCount[clientIP] || 0),
+    maxTracks: MAX_TRACKS_PER_IP
+  });
+});
+
+// Vote for a track
+app.post('/api/vote/:trackId', (req, res) => {
+  const { trackId } = req.params;
+  const clientIP = getClientIP(req);
+  
+  const track = partyQueue.find(t => t.id === trackId);
+  if (!track) {
+    return res.status(404).json({ error: 'Track not found in queue' });
+  }
+  
+  if (!trackVotes[trackId]) {
+    trackVotes[trackId] = new Set();
+  }
+  
+  if (trackVotes[trackId].has(clientIP)) {
+    // Remove vote
+    trackVotes[trackId].delete(clientIP);
+    track.votes--;
+    return res.json({ success: true, votes: track.votes, hasVoted: false });
+  }
+  
+  // Add vote
+  trackVotes[trackId].add(clientIP);
+  track.votes++;
+  res.json({ success: true, votes: track.votes, hasVoted: true });
+});
+
+// Get remaining tracks for current user
+app.get('/api/track-limit', (req, res) => {
+  const clientIP = getClientIP(req);
+  const currentCount = ipTrackCount[clientIP] || 0;
+  res.json({
+    used: currentCount,
+    remaining: MAX_TRACKS_PER_IP - currentCount,
+    max: MAX_TRACKS_PER_IP
+  });
 });
 
 // Get current playback state
@@ -279,6 +414,154 @@ app.get('/api/playback', ensureToken, async (req, res) => {
 app.post('/api/logout', (req, res) => {
   tokenData = { accessToken: null, refreshToken: null, expiresAt: null };
   res.json({ success: true });
+});
+
+// Admin authentication middleware
+function requireAdmin(req, res, next) {
+  const authHeader = req.headers.authorization;
+  if (!ADMIN_PASSWORD) {
+    return res.status(503).json({ error: 'Admin panel not configured. Set ADMIN_PASSWORD environment variable.' });
+  }
+  
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Admin authentication required' });
+  }
+  
+  const token = authHeader.substring(7);
+  if (token !== ADMIN_PASSWORD) {
+    return res.status(403).json({ error: 'Invalid admin credentials' });
+  }
+  
+  next();
+}
+
+// Admin: Check if admin is configured
+app.get('/api/admin/status', (req, res) => {
+  res.json({ configured: !!ADMIN_PASSWORD });
+});
+
+// Admin: Verify credentials
+app.post('/api/admin/login', authLimiter, (req, res) => {
+  const { password } = req.body;
+  
+  if (!ADMIN_PASSWORD) {
+    return res.status(503).json({ error: 'Admin panel not configured' });
+  }
+  
+  if (password === ADMIN_PASSWORD) {
+    return res.json({ success: true, token: ADMIN_PASSWORD });
+  }
+  
+  res.status(403).json({ error: 'Invalid password' });
+});
+
+// Admin: Skip current track
+app.post('/api/admin/skip', requireAdmin, ensureToken, async (req, res) => {
+  try {
+    const response = await spotifyFetch('/me/player/next', {
+      method: 'POST'
+    });
+
+    if (response.status === 204 || response.ok) {
+      return res.json({ success: true, message: 'Track skipped' });
+    }
+
+    if (response.status === 404) {
+      return res.status(404).json({ error: 'No active device found' });
+    }
+
+    const errorData = await response.json();
+    return res.status(response.status).json({ error: errorData.error?.message || 'Failed to skip track' });
+  } catch (err) {
+    console.error('Skip error:', err);
+    res.status(500).json({ error: 'Failed to skip track' });
+  }
+});
+
+// Admin: Remove track from party queue
+app.delete('/api/admin/queue/:trackId', requireAdmin, (req, res) => {
+  const { trackId } = req.params;
+  
+  const index = partyQueue.findIndex(t => t.id === trackId);
+  if (index === -1) {
+    return res.status(404).json({ error: 'Track not found in queue' });
+  }
+  
+  partyQueue.splice(index, 1);
+  delete trackVotes[trackId];
+  
+  res.json({ success: true, message: 'Track removed from party queue' });
+});
+
+// Admin: Clear all party queue
+app.delete('/api/admin/queue', requireAdmin, (req, res) => {
+  partyQueue = [];
+  trackVotes = {};
+  res.json({ success: true, message: 'Party queue cleared' });
+});
+
+// Admin: Reset track limits for an IP or all
+app.post('/api/admin/reset-limits', requireAdmin, (req, res) => {
+  const { ip } = req.body;
+  
+  if (ip) {
+    delete ipTrackCount[ip];
+    res.json({ success: true, message: `Track limit reset for ${ip}` });
+  } else {
+    ipTrackCount = {};
+    res.json({ success: true, message: 'All track limits reset' });
+  }
+});
+
+// Admin: Get all IPs with their track counts
+app.get('/api/admin/track-limits', requireAdmin, (req, res) => {
+  res.json({ limits: ipTrackCount });
+});
+
+// Admin: Pause playback
+app.post('/api/admin/pause', requireAdmin, ensureToken, async (req, res) => {
+  try {
+    const response = await spotifyFetch('/me/player/pause', {
+      method: 'PUT'
+    });
+
+    if (response.status === 204 || response.ok) {
+      return res.json({ success: true, message: 'Playback paused' });
+    }
+
+    if (response.status === 404) {
+      return res.status(404).json({ error: 'No active device found' });
+    }
+
+    const errorData = await response.json();
+    return res.status(response.status).json({ error: errorData.error?.message || 'Failed to pause' });
+  } catch (err) {
+    console.error('Pause error:', err);
+    res.status(500).json({ error: 'Failed to pause playback' });
+  }
+});
+
+// Admin: Resume playback
+app.post('/api/admin/play', requireAdmin, ensureToken, async (req, res) => {
+  try {
+    const response = await spotifyFetch('/me/player/play', {
+      method: 'PUT'
+    });
+
+    if (response.status === 204 || response.ok) {
+      return res.json({ success: true, message: 'Playback resumed' });
+    }
+
+    if (response.status === 404) {
+      return res.status(404).json({ error: 'No active device found' });
+    }
+
+    const errorData = await response.json();
+    return res.status(response.status).json({ error: errorData.error?.message || 'Failed to resume' });
+  } catch (err) {
+    console.error('Play error:', err);
+    res.status(500).json({ error: 'Failed to resume playback' });
+  }
 });
 
 // Serve the main page

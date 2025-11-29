@@ -1,0 +1,58 @@
+# Caddy Reverse Proxy Configuration for Party Jukebox
+# Place this file in /etc/caddy/Caddyfile or alongside Caddy binary
+# Caddy automatically manages HTTPS certificates via Let's Encrypt
+
+# For local network with self-signed certs (recommended for home use)
+jukebox.local {
+    # Use self-signed certificate for local domain
+    tls internal
+
+    # Reverse proxy to Node.js app
+    reverse_proxy localhost:3000
+
+    # Security headers
+    header {
+        X-Frame-Options "SAMEORIGIN"
+        X-Content-Type-Options "nosniff"
+        X-XSS-Protection "1; mode=block"
+        Referrer-Policy "strict-origin-when-cross-origin"
+    }
+
+    # Enable gzip compression
+    encode gzip
+
+    # Rate limiting (requires rate_limit plugin)
+    # rate_limit {
+    #     zone jukebox {
+    #         key {remote_host}
+    #         events 10
+    #         window 1s
+    #     }
+    # }
+
+    # Logging
+    log {
+        output file /var/log/caddy/jukebox.log
+        format console
+    }
+}
+
+# For public domain with automatic Let's Encrypt (if exposed to internet)
+# jukebox.example.com {
+#     reverse_proxy localhost:3000
+#     
+#     header {
+#         X-Frame-Options "SAMEORIGIN"
+#         X-Content-Type-Options "nosniff"
+#     }
+#     
+#     encode gzip
+#     
+#     log {
+#         output file /var/log/caddy/jukebox.log
+#     }
+# }
+
+# IP whitelist example (restrict to local network only)
+# @blocked not remote_ip 192.168.1.0/24
+# respond @blocked "Access denied" 403
