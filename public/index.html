@@ -256,21 +256,19 @@
         tab.classList.add('active');
         document.getElementById(tab.dataset.tab + 'Tab').classList.add('active');
         
-        // Update active tab state
-        activeTab = tab.dataset.tab;
-        
-        // Clear queue refresh interval when leaving queue tab
-        if (queueRefreshInterval && activeTab !== 'queue') {
+        // Clear queue refresh interval when switching tabs
+        if (queueRefreshInterval) {
           clearInterval(queueRefreshInterval);
           queueRefreshInterval = null;
         }
         
+        // Update active tab state
+        activeTab = tab.dataset.tab;
+        
         if (tab.dataset.tab === 'queue') {
           loadPartyQueue();
           // Start periodic refresh for queue tab (every 10 seconds)
-          if (!queueRefreshInterval) {
-            queueRefreshInterval = setInterval(loadPartyQueue, 10000);
-          }
+          queueRefreshInterval = setInterval(loadPartyQueue, 10000);
         }
         if (tab.dataset.tab === 'qr') loadQRCode();
         if (tab.dataset.tab === 'admin') checkAdminStatus();
