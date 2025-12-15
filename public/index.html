@@ -215,7 +215,7 @@
     let adminToken = sessionStorage.getItem('adminToken') || '';
     let trackLimit = { used: 0, remaining: 5, max: 5 };
     let queueRefreshInterval = null;
-    let activeTab = 'search';
+    let activeTab = 'search'; // Matches the default active tab in HTML
 
     // Elements
     const statusDot = document.getElementById('statusDot');
