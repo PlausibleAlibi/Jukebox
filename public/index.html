@@ -214,6 +214,8 @@
     // State
     let adminToken = sessionStorage.getItem('adminToken') || '';
     let trackLimit = { used: 0, remaining: 5, max: 5 };
+    let queueRefreshInterval = null;
+    let activeTab = 'search'; // Matches the default active tab in HTML
 
     // Elements
     const statusDot = document.getElementById('statusDot');
@@ -254,7 +256,20 @@
         tab.classList.add('active');
         document.getElementById(tab.dataset.tab + 'Tab').classList.add('active');
         
-        if (tab.dataset.tab === 'queue') loadPartyQueue();
+        // Clear queue refresh interval when switching tabs
+        if (queueRefreshInterval) {
+          clearInterval(queueRefreshInterval);
+          queueRefreshInterval = null;
+        }
+        
+        // Update active tab state
+        activeTab = tab.dataset.tab;
+        
+        if (tab.dataset.tab === 'queue') {
+          loadPartyQueue();
+          // Start periodic refresh for queue tab (every 10 seconds)
+          queueRefreshInterval = setInterval(loadPartyQueue, 10000);
+        }
         if (tab.dataset.tab === 'qr') loadQRCode();
         if (tab.dataset.tab === 'admin') checkAdminStatus();
       });
@@ -399,6 +414,11 @@
           trackLimit.remaining = data.remaining;
           tracksRemaining.textContent = data.remaining;
           trackLimitFill.style.width = ((data.remaining / trackLimit.max) * 100) + '%';
+        }
+        
+        // Auto-refresh party queue if user is on Queue tab
+        if (activeTab === 'queue') {
+          loadPartyQueue();
         }
       } catch (err) {
         button.textContent = 'Add';
