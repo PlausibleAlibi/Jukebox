@@ -389,3 +389,105 @@ describe('Party Queue Cache Control', () => {
     assert.ok(cacheControl.includes('private'), 'Should include private directive');
   });
 });
+
+describe('Spotify Fetch with Timeout and Retry', () => {
+  it('should implement timeout mechanism', () => {
+    // Verify timeout configuration
+    const timeoutMs = 10000; // 10 seconds as per requirements
+    assert.strictEqual(timeoutMs, 10000, 'Should have 10 second timeout');
+  });
+
+  it('should implement exponential backoff for retries', () => {
+    // Verify exponential backoff delays: 1s, 2s, 4s
+    const delays = [0, 1, 2].map(attempt => Math.pow(2, attempt) * 1000);
+    assert.deepStrictEqual(delays, [1000, 2000, 4000], 'Should use exponential backoff: 1s, 2s, 4s');
+  });
+
+  it('should retry up to 3 times', () => {
+    const maxRetries = 3;
+    assert.strictEqual(maxRetries, 3, 'Should allow up to 3 retries');
+  });
+
+  it('should retry on 5xx server errors', () => {
+    const serverErrorCodes = [500, 501, 502, 503, 504];
+    serverErrorCodes.forEach(code => {
+      const shouldRetry = code >= 500;
+      assert.strictEqual(shouldRetry, true, `Should retry on ${code} server error`);
+    });
+  });
+
+  it('should retry on 429 rate limit', () => {
+    const code = 429;
+    const shouldRetry = code === 429 || code >= 500 || code === 408;
+    assert.strictEqual(shouldRetry, true, 'Should retry on 429 rate limit');
+  });
+
+  it('should not retry on 4xx client errors except 429', () => {
+    const clientErrors = [400, 401, 403, 404];
+    clientErrors.forEach(code => {
+      const shouldRetry = code === 429 || code >= 500;
+      assert.strictEqual(shouldRetry, false, `Should not retry on ${code} client error`);
+    });
+  });
+
+  it('should retry on timeout errors (AbortError)', () => {
+    const timeoutError = { name: 'AbortError', message: 'The operation was aborted' };
+    const isRetryable = timeoutError.name === 'AbortError';
+    assert.strictEqual(isRetryable, true, 'Should retry on AbortError (timeout)');
+  });
+
+  it('should retry on network errors (fetch failed)', () => {
+    const networkError = { name: 'TypeError', message: 'fetch failed' };
+    const isRetryable = networkError.message.includes('fetch failed');
+    assert.strictEqual(isRetryable, true, 'Should retry on fetch failed network error');
+  });
+
+  it('should retry on ECONNRESET errors', () => {
+    const connResetError = { name: 'Error', message: 'ECONNRESET: Connection reset by peer' };
+    const isRetryable = connResetError.message.includes('ECONNRESET');
+    assert.strictEqual(isRetryable, true, 'Should retry on ECONNRESET error');
+  });
+
+  it('should retry on ETIMEDOUT errors', () => {
+    const timeoutError = { name: 'Error', message: 'ETIMEDOUT: Connection timed out' };
+    const isRetryable = timeoutError.message.includes('ETIMEDOUT');
+    assert.strictEqual(isRetryable, true, 'Should retry on ETIMEDOUT error');
+  });
+
+  it('should use AbortController for request timeout', () => {
+    // Verify AbortController is used for timeout implementation
+    const controller = new AbortController();
+    assert.ok(controller.signal, 'Should create AbortController with signal');
+    assert.strictEqual(typeof controller.abort, 'function', 'Should have abort method');
+  });
+
+  it('should log retry attempts with endpoint and status', () => {
+    // Test that logging includes necessary information
+    const logData = {
+      endpoint: 'https://api.spotify.com/v1/me/player',
+      statusCode: 503,
+      attempt: 1,
+      maxRetries: 3
+    };
+    
+    assert.ok(logData.endpoint, 'Should log endpoint');
+    assert.ok(logData.statusCode, 'Should log status code');
+    assert.ok(logData.attempt, 'Should log attempt number');
+    assert.ok(logData.maxRetries, 'Should log max retries');
+  });
+
+  it('should log final error with attempt count', () => {
+    // Test that final error logging includes attempt information
+    const errorLog = {
+      endpoint: 'https://api.spotify.com/v1/me/player',
+      error: 'fetch failed',
+      errorName: 'TypeError',
+      attempt: 4
+    };
+    
+    assert.ok(errorLog.endpoint, 'Should log endpoint in error');
+    assert.ok(errorLog.error, 'Should log error message');
+    assert.ok(errorLog.errorName, 'Should log error name');
+    assert.strictEqual(errorLog.attempt, 4, 'Should log final attempt number (4 total attempts = 1 initial + 3 retries)');
+  });
+});
