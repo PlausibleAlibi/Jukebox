@@ -257,7 +257,6 @@
     const authActions = document.getElementById('authActions');
     const errorMessage = document.getElementById('errorMessage');
     const configWarning = document.getElementById('configWarning');
-    const hostSection = document.getElementById('hostSection');
     const mainContent = document.getElementById('mainContent');
     const searchInput = document.getElementById('searchInput');
     const searchBtn = document.getElementById('searchBtn');
@@ -365,7 +364,6 @@
           statusText.textContent = 'Connected';
           authActions.innerHTML = '<button class="btn btn-secondary" onclick="logout()">Disconnect</button>';
           mainContent.style.display = 'block';
-          // hostSection.style.display = 'none'; // Commented out - redundant
           updateNowPlaying();
           updateTrackLimit();
           setInterval(updateNowPlaying, 20000); // Poll every 20 seconds
@@ -374,7 +372,6 @@
           statusDot.classList.remove('connected');
           statusText.textContent = 'Not connected';
           authActions.innerHTML = '<a href="/login" class="btn">Connect</a>';
-          // hostSection.style.display = 'block'; // Commented out - redundant
           mainContent.style.display = 'none';
         }
       } catch (err) {
