@@ -267,8 +267,8 @@
         
         if (tab.dataset.tab === 'queue') {
           loadPartyQueue();
-          // Start periodic refresh for queue tab (every 10 seconds)
-          queueRefreshInterval = setInterval(loadPartyQueue, 10000);
+          // Start periodic refresh for queue tab (every 20 seconds)
+          queueRefreshInterval = setInterval(loadPartyQueue, 20000);
         }
         if (tab.dataset.tab === 'qr') loadQRCode();
         if (tab.dataset.tab === 'admin') checkAdminStatus();
@@ -308,8 +308,8 @@
           hostSection.style.display = 'none';
           updateNowPlaying();
           updateTrackLimit();
-          setInterval(updateNowPlaying, 10000);
-          setInterval(updateTrackLimit, 30000);
+          setInterval(updateNowPlaying, 20000); // Poll every 20 seconds
+          setInterval(updateTrackLimit, 60000); // Poll every 60 seconds
         } else {
           statusDot.classList.remove('connected');
           statusText.textContent = 'Not connected';
