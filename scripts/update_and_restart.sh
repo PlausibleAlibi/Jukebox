@@ -46,10 +46,17 @@ echo ""
 
 # Step 2: Pull latest code from remote repository
 echo "[2/4] Pulling latest code from remote repository..."
-if git pull; then
-    echo "      Code updated successfully."
+echo "      Fetching latest changes..."
+if git fetch origin; then
+    echo "      Resetting to origin/main..."
+    if git reset --hard origin/main; then
+        echo "      Code updated successfully."
+    else
+        echo "ERROR: Failed to reset to remote repository state."
+        exit 1
+    fi
 else
-    echo "ERROR: Failed to pull latest code from remote repository."
+    echo "ERROR: Failed to fetch from remote repository."
     exit 1
 fi
 echo ""
