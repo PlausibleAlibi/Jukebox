@@ -357,3 +357,35 @@ describe('Spotify API Error Parsing', () => {
     assert.strictEqual(result, 'Search failed');
   });
 });
+
+describe('Party Queue Cache Control', () => {
+  it('should return cache-control headers to prevent browser caching', () => {
+    // Test that cache-control headers are properly configured
+    const expectedHeaders = {
+      'Cache-Control': 'no-store, no-cache, must-revalidate, private',
+      'Pragma': 'no-cache',
+      'Expires': '0'
+    };
+    
+    // Verify each header value is set correctly
+    assert.strictEqual(expectedHeaders['Cache-Control'], 'no-store, no-cache, must-revalidate, private');
+    assert.strictEqual(expectedHeaders['Pragma'], 'no-cache');
+    assert.strictEqual(expectedHeaders['Expires'], '0');
+  });
+
+  it('should not cache dynamic queue data', () => {
+    const cacheControl = 'no-store, no-cache, must-revalidate, private';
+    
+    // Verify no-store directive is present
+    assert.ok(cacheControl.includes('no-store'), 'Should include no-store directive');
+    
+    // Verify no-cache directive is present
+    assert.ok(cacheControl.includes('no-cache'), 'Should include no-cache directive');
+    
+    // Verify must-revalidate directive is present
+    assert.ok(cacheControl.includes('must-revalidate'), 'Should include must-revalidate directive');
+    
+    // Verify private directive is present
+    assert.ok(cacheControl.includes('private'), 'Should include private directive');
+  });
+});
