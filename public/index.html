@@ -189,8 +189,18 @@
       </div>
 
       <div id="queueTab" class="tab-content">
-        <div id="queueList" class="queue-list">
-          <div class="message">No songs in the party queue yet. Add some!</div>
+        <div style="margin-bottom: 16px;">
+          <h3 style="font-size: 0.9rem; color: rgba(255,255,255,0.8); margin-bottom: 8px;">🎵 Current Spotify Queue</h3>
+          <button class="btn btn-secondary" onclick="loadSpotifyQueue()" style="margin-bottom: 8px;">🔄 Refresh Spotify Queue</button>
+          <div id="spotifyQueueList" class="queue-list" style="margin-bottom: 24px;">
+            <div class="message">Click "Refresh Spotify Queue" to load</div>
+          </div>
+        </div>
+        <div>
+          <h3 style="font-size: 0.9rem; color: rgba(255,255,255,0.8); margin-bottom: 8px;">🗳️ Party Voting Queue</h3>
+          <div id="queueList" class="queue-list">
+            <div class="message">No songs in the party queue yet. Add some!</div>
+          </div>
         </div>
       </div>
 
@@ -216,6 +226,13 @@
           </div>
           <div id="adminControls" style="display:none;">
             <p style="color:rgba(255,255,255,0.6);margin-bottom:12px;font-size:0.85rem;">Logged in as admin</p>
+            <div style="background:rgba(255,255,255,0.05);padding:12px;border-radius:8px;margin-bottom:12px;">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                <span style="font-size:0.9rem;">Track Limits: <strong id="limitsStatus">ON</strong></span>
+                <button class="btn btn-secondary" onclick="adminToggleLimits()" id="toggleLimitsBtn">Disable Limits</button>
+              </div>
+              <p style="color:rgba(255,255,255,0.5);font-size:0.75rem;margin:0;">Toggle enforcement of per-user track limits</p>
+            </div>
             <div class="admin-help-text">
               <strong>Clear Display Queue</strong> removes songs from the voting list (doesn't affect Spotify playback)<br>
               <strong>Reset Limits</strong> allows all users to add more tracks
@@ -247,9 +264,12 @@
     // State
     let adminToken = sessionStorage.getItem('adminToken') || '';
     let userNickname = sessionStorage.getItem('userNickname') || '';
-    let trackLimit = { used: 0, remaining: 5, max: 5 };
+    let trackLimit = { used: 0, remaining: 5, max: 5, enforceTrackLimits: true };
     let queueRefreshInterval = null;
     let activeTab = 'search'; // Matches the default active tab in HTML
+    let appConfig = { appTitle: 'Party JukeBox', appByline: 'Your collaborative music queue', maxTracksPerIP: 5, enforceTrackLimits: true };
+    let spotifyQueue = null;
+    let spotifyQueueLoaded = false;
 
     // Elements
     const statusDot = document.getElementById('statusDot');
@@ -326,6 +346,11 @@
         
         if (tab.dataset.tab === 'queue') {
           loadPartyQueue();
+          // Load Spotify queue on first activation
+          if (!spotifyQueueLoaded) {
+            loadSpotifyQueue();
+            spotifyQueueLoaded = true;
+          }
           // Start periodic refresh for queue tab (every 20 seconds)
           queueRefreshInterval = setInterval(loadPartyQueue, 20000);
         }
@@ -335,6 +360,7 @@
     });
 
     // Initialize
+    loadConfig();
     checkStatus();
 
     // Event listeners
@@ -379,14 +405,44 @@
       }
     }
 
+    async function loadConfig() {
+      try {
+        const response = await fetch('/api/config');
+        const data = await response.json();
+        appConfig = data;
+        
+        // Update page title and subtitle
+        document.title = appConfig.appTitle;
+        const titleElement = document.querySelector('h1 span');
+        if (titleElement) {
+          // Extract just the title text (e.g., "Brooklyn's JukeBox" -> "JukeBox")
+          const titleParts = appConfig.appTitle.split(/['']s\s+/);
+          titleElement.textContent = titleParts.length > 1 ? titleParts[1] : appConfig.appTitle;
+        }
+        const subtitleElement = document.querySelector('.subtitle');
+        if (subtitleElement) {
+          subtitleElement.textContent = '🥂 ' + appConfig.appByline + ' 🎊';
+        }
+      } catch (err) {
+        console.error('Failed to load config:', err);
+      }
+    }
+
     async function updateTrackLimit() {
       try {
         const response = await fetch('/api/track-limit');
         const data = await response.json();
         trackLimit = data;
-        tracksRemaining.textContent = data.remaining;
-        tracksMax.textContent = data.max;
-        trackLimitFill.style.width = ((data.remaining / data.max) * 100) + '%';
+        
+        if (data.enforceTrackLimits) {
+          tracksRemaining.textContent = data.remaining;
+          tracksMax.textContent = data.max;
+          trackLimitFill.style.width = ((data.remaining / data.max) * 100) + '%';
+        } else {
+          tracksRemaining.textContent = '∞';
+          tracksMax.textContent = '∞';
+          trackLimitFill.style.width = '100%';
+        }
       } catch (err) {
         console.error('Failed to get track limit:', err);
       }
@@ -426,7 +482,7 @@
               <div class="track-artist">${escapeHtml(track.artist)}</div>
               <div class="track-album">${escapeHtml(track.album)}</div>
             </div>
-            <button class="add-btn" data-track-id="${escapeHtml(track.id)}" ${trackLimit.remaining <= 0 ? 'disabled' : ''}>Add</button>
+            <button class="add-btn" data-track-id="${escapeHtml(track.id)}" ${!trackLimit.enforceTrackLimits || trackLimit.remaining > 0 ? '' : 'disabled'}>Add</button>
           </div>
         `}).join('');
 
@@ -469,8 +525,13 @@
         
         if (data.remaining !== undefined) {
           trackLimit.remaining = data.remaining;
-          tracksRemaining.textContent = data.remaining;
-          trackLimitFill.style.width = ((data.remaining / trackLimit.max) * 100) + '%';
+          if (trackLimit.enforceTrackLimits) {
+            tracksRemaining.textContent = data.remaining;
+            trackLimitFill.style.width = ((data.remaining / trackLimit.max) * 100) + '%';
+          } else {
+            tracksRemaining.textContent = '∞';
+            trackLimitFill.style.width = '100%';
+          }
         }
         
         // Auto-refresh party queue if user is on Queue tab
@@ -528,6 +589,47 @@
       }
     }
 
+    async function loadSpotifyQueue() {
+      const spotifyQueueList = document.getElementById('spotifyQueueList');
+      
+      try {
+        spotifyQueueList.innerHTML = '<div class="message">Loading Spotify queue...</div>';
+        
+        const response = await fetch('/api/spotify-queue');
+        
+        if (response.status === 404) {
+          spotifyQueueList.innerHTML = '<div class="message">No active device. Start playing on Spotify first.</div>';
+          return;
+        }
+        
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data.error || 'Failed to load Spotify queue');
+        }
+
+        spotifyQueue = data;
+        
+        if (!data.queue || data.queue.length === 0) {
+          spotifyQueueList.innerHTML = '<div class="message">Spotify queue is empty</div>';
+          return;
+        }
+
+        spotifyQueueList.innerHTML = data.queue.map(track => `
+          <div class="track-card">
+            <img class="track-art" src="${track.albumArt || 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect fill=%22%23333%22 width=%22100%22 height=%22100%22/><text x=%2250%22 y=%2255%22 text-anchor=%22middle%22 fill=%22%23666%22 font-size=%2240%22>♪</text></svg>'}" alt="" loading="lazy">
+            <div class="track-info">
+              <div class="track-name">${escapeHtml(track.name)}</div>
+              <div class="track-artist">${escapeHtml(track.artist)}</div>
+              <div class="track-album">${escapeHtml(track.album)}</div>
+            </div>
+          </div>
+        `).join('');
+      } catch (err) {
+        spotifyQueueList.innerHTML = '<div class="message">' + escapeHtml(err.message) + '</div>';
+      }
+    }
+
     async function loadQRCode() {
       const qrCode = document.getElementById('qrCode');
       const qrUrl = document.getElementById('qrUrl');
@@ -562,12 +664,37 @@
         if (adminToken) {
           document.getElementById('adminLoginForm').style.display = 'none';
           document.getElementById('adminControls').style.display = 'block';
+          
+          // Update enforcement status display
+          await updateEnforcementStatus();
         } else {
           document.getElementById('adminLoginForm').style.display = 'block';
           document.getElementById('adminControls').style.display = 'none';
         }
       } catch (err) {
         showError('Failed to check admin status');
+      }
+    }
+
+    async function updateEnforcementStatus() {
+      try {
+        const response = await fetch('/api/config');
+        const data = await response.json();
+        
+        const limitsStatus = document.getElementById('limitsStatus');
+        const toggleBtn = document.getElementById('toggleLimitsBtn');
+        
+        if (data.enforceTrackLimits) {
+          limitsStatus.textContent = 'ON';
+          limitsStatus.style.color = '#FFD700';
+          toggleBtn.textContent = 'Disable Limits';
+        } else {
+          limitsStatus.textContent = 'OFF';
+          limitsStatus.style.color = 'rgba(255,255,255,0.5)';
+          toggleBtn.textContent = 'Enable Limits';
+        }
+      } catch (err) {
+        console.error('Failed to update enforcement status:', err);
       }
     }
 
@@ -656,6 +783,19 @@
       await adminAction('/api/admin/reset-limits');
       showToast('Track limits reset');
       updateTrackLimit();
+    }
+
+    async function adminToggleLimits() {
+      try {
+        const data = await adminAction('/api/admin/toggle-limits');
+        showToast(data.message);
+        
+        // Update UI to reflect new status
+        await updateEnforcementStatus();
+        await updateTrackLimit();
+      } catch (err) {
+        // Error already shown by adminAction
+      }
     }
 
     async function updateNowPlaying() {
