@@ -5,14 +5,15 @@ A lightweight web application that allows guests on your local network to search
 ## Features
 
 - **Simple Setup**: Just configure your Spotify credentials and run
+- **Customizable Branding**: Configure app title and byline via environment variables
 - **LAN-Friendly**: Guests connect via your local network IP
 - **Mobile-Optimized**: Fully responsive design works great on phones and tablets
-- **Real-Time**: Shows currently playing track
+- **Real-Time**: Shows currently playing track and Spotify queue
 - **Secure**: Only the host needs a Spotify account; guests just search and add
 - **QR Code Sharing**: Generate QR codes for guests to easily join on mobile
 - **Queue Voting**: Users can upvote songs to influence play order
-- **Track Limits**: Prevent queue flooding with per-device track limits
-- **Host Admin Panel**: Skip tracks, pause/play, clear queue, and reset limits
+- **Track Limits**: Prevent queue flooding with per-device track limits (toggleable)
+- **Host Admin Panel**: Skip tracks, pause/play, clear queue, reset limits, and toggle track enforcement
 - **RFC 8252 Compliant OAuth**: Dynamic loopback port selection for desktop apps
 
 ## Quick Start
@@ -82,7 +83,10 @@ ipconfig
 | `SPOTIFY_CLIENT_SECRET` | Your Spotify app's Client Secret | Required |
 | `SPOTIFY_REDIRECT_URI` | OAuth callback URL (set only for server deployments) | Dynamic (RFC 8252) |
 | `PORT` | Server port (HTTP mode) | `3000` |
+| `APP_TITLE` | Application title shown to users | `Party JukeBox` |
+| `APP_BYLINE` | Subtitle/tagline shown to users | `Your collaborative music queue` |
 | `MAX_TRACKS_PER_IP` | Maximum tracks a device can queue | `5` |
+| `ENFORCE_TRACK_LIMITS` | Enable/disable track limit enforcement | `true` |
 | `ADMIN_PASSWORD` | Password for host admin controls | Empty (disabled) |
 | `SSL_CERT_PATH` | Path to SSL certificate file | Empty (disabled) |
 | `SSL_KEY_PATH` | Path to SSL private key file | Empty (disabled) |
@@ -235,18 +239,34 @@ For guests to access the jukebox:
 
 ## Party Features
 
+### 🎨 Customizable Branding
+Personalize the application title and byline for your event:
+- Set `APP_TITLE` to customize the main title (e.g., "Brooklyn's JukeBox")
+- Set `APP_BYLINE` to add a custom subtitle (e.g., "Ring in the New Year with music")
+- Changes are displayed dynamically to all users without code modifications
+
+### 🎵 Spotify Queue Integration
+View what's actually queued in Spotify:
+- The Queue tab shows both the **Spotify Queue** (actual playback queue) and the **Party Voting Queue** (collaborative suggestions)
+- Refresh the Spotify queue on demand to see what's coming up next
+- Clear visual distinction between the two queues
+
 ### 🗳️ Queue Voting
-Guests can upvote songs in the queue. Songs with more votes appear higher in the party queue display. This helps ensure popular choices get attention!
+Guests can upvote songs in the party queue. Songs with more votes appear higher in the party queue display. This helps ensure popular choices get attention!
 
 ### 🚫 Track Limits
-Each device (by IP) can only add a limited number of tracks (default: 5). This prevents any single guest from dominating the queue. The host can reset limits via the admin panel.
+Each device (by IP) can only add a limited number of tracks (default: 5). This prevents any single guest from dominating the queue. The host can:
+- Reset limits via the admin panel to allow users to add more tracks
+- **Toggle enforcement on/off** - when disabled, users can add unlimited tracks
+- Set `ENFORCE_TRACK_LIMITS=false` in `.env` to start with limits disabled
 
 ### ⚙️ Host Admin Panel
 Set `ADMIN_PASSWORD` in your `.env` to enable host controls:
 - **Skip**: Skip the current track
 - **Pause/Play**: Control playback
-- **Clear Queue**: Remove all tracks from the party queue
-- **Reset Limits**: Reset track limits for all guests
+- **Toggle Limits**: Enable or disable track limit enforcement in real-time
+- **Clear Queue**: Remove all tracks from the party voting queue display
+- **Reset Limits**: Reset track counts for all guests
 
 ## Server Deployment
 
@@ -306,27 +326,32 @@ cp .env.example .env
 # Update SSL_CERT_PATH and SSL_KEY_PATH with your certificate filenames
 
 # 4. Start the container
-./docker-start.sh
+./scripts/docker-start.sh
 
 # 5. Access the app
 # https://192.168.x.x/ (replace with your LAN IP)
 ```
 
-#### Docker Start/Stop Scripts
+## Scripts
 
-Convenience scripts are provided for managing the Docker container. These scripts handle port mapping, environment loading, and volume mounts automatically.
+The `scripts/` directory contains utility scripts for managing the application:
 
 | Script | Description |
 |--------|-------------|
-| `./docker-start.sh` | Build and start the container with all volume mounts (.env, certs, logs) |
-| `./docker-stop.sh` | Stop and remove the container (logs are preserved) |
+| `docker-start.sh` | Build and start the Docker container with all volume mounts (.env, certs, logs) |
+| `docker-stop.sh` | Stop and remove the Docker container (logs are preserved) |
+| `update_and_restart.sh` | Pull latest code from git and restart the systemd service |
+| `tag-release.sh` | Interactive tool for creating version tags with semantic versioning |
 
+### Using the Scripts
+
+#### Docker Management
 ```bash
 # Start the container
-./docker-start.sh
+./scripts/docker-start.sh
 
 # Stop the container
-./docker-stop.sh
+./scripts/docker-stop.sh
 
 # View logs
 docker logs -f jukebox
@@ -419,18 +444,17 @@ mkdir -p logs && sudo chown 1001:1001 logs
 ./docker-start.sh
 ```
 
-### Update and Restart Script
+### Automated Updates
 
-A Bash script (`update_and_restart.sh`) is provided to automate pulling the latest code and restarting the jukebox service.
+A Bash script is provided to automate pulling the latest code and restarting the jukebox service.
+
+**Script:** `scripts/update_and_restart.sh`
 
 #### Usage
 
 ```bash
-# Make the script executable (first time only)
-chmod +x update_and_restart.sh
-
 # Run the script (requires sudo for service restart)
-sudo ./update_and_restart.sh
+sudo ./scripts/update_and_restart.sh
 ```
 
 #### What the Script Does
@@ -441,7 +465,7 @@ sudo ./update_and_restart.sh
 
 #### Configuration
 
-Edit the variables at the top of `update_and_restart.sh` to customize:
+Edit the variables at the top of `scripts/update_and_restart.sh` to customize:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
@@ -453,6 +477,88 @@ Edit the variables at the top of `update_and_restart.sh` to customize:
 - **Git** must be installed and configured
 - **systemd** service must be set up (see `deploy/jukebox.service`)
 - Script must be run with sufficient permissions to restart the service (typically via `sudo`)
+
+### Release Management
+
+The `scripts/tag-release.sh` script provides an interactive tool for creating version tags with semantic versioning.
+
+#### Features
+
+- Interactive prompts for version number with validation
+- Option to specify release type (major, minor, patch) with auto-increment
+- Automatic tag creation with annotation
+- Push tags to remote repository
+- Generate release notes template
+- Comprehensive error handling and confirmation prompts
+
+#### Usage
+
+```bash
+# Run the script
+./scripts/tag-release.sh
+```
+
+The script will:
+1. Display the latest tag
+2. Prompt you to choose between manual version entry or auto-increment
+3. For auto-increment, select major/minor/patch release type
+4. Open your editor to write release notes
+5. Show a summary and ask for confirmation
+6. Create and optionally push the tag to the remote repository
+
+#### Example
+
+```bash
+$ ./scripts/tag-release.sh
+========================================
+Party Jukebox Release Tagging Tool
+========================================
+
+ℹ Latest tag: v1.0.0
+
+How would you like to specify the new version?
+  1) Enter version number manually
+  2) Auto-increment (major, minor, or patch)
+
+Choose an option (1 or 2): 2
+
+Select release type:
+  1) Major (breaking changes): v1.0.0 -> v2.0.0
+  2) Minor (new features):     v1.0.0 -> v1.1.0
+  3) Patch (bug fixes):        v1.0.0 -> v1.0.1
+
+Choose release type (1-3): 2
+
+ℹ New version: v1.1.0
+
+# Editor opens for release notes...
+
+========================================
+Release Summary
+========================================
+Version: v1.1.0
+Previous: v1.0.0
+
+Release Notes:
+# Release v1.1.0
+
+## New Features
+- Added customizable branding
+- Spotify queue integration
+...
+
+========================================
+
+Create and push this tag? (y/N) y
+✓ Tag created successfully.
+
+Push tag to remote? (y/N) y
+✓ Tag pushed to remote successfully.
+
+========================================
+✓ Release v1.1.0 completed successfully!
+========================================
+```
 
 #### Example Output
 
@@ -532,6 +638,7 @@ sudo iptables -A INPUT -p tcp --dport 3000 -j DROP
 | `/login` | GET | Initiates Spotify OAuth |
 | `/callback` | GET | OAuth callback handler |
 | `/api/status` | GET | Check authentication status |
+| `/api/config` | GET | Get app configuration (title, byline, limits) |
 | `/api/qrcode` | GET | Generate QR code for URL sharing |
 | `/api/search?q=` | GET | Search for tracks |
 | `/api/queue` | POST | Add track to queue |
@@ -539,6 +646,7 @@ sudo iptables -A INPUT -p tcp --dport 3000 -j DROP
 | `/api/vote/:trackId` | POST | Vote/unvote for a track |
 | `/api/track-limit` | GET | Get remaining tracks for current user |
 | `/api/playback` | GET | Get current playback state |
+| `/api/spotify-queue` | GET | Get Spotify's actual queue (requires auth) |
 | `/api/logout` | POST | Clear authentication |
 
 ### Admin Endpoints (require `Authorization: Bearer <ADMIN_PASSWORD>`)
@@ -553,6 +661,7 @@ sudo iptables -A INPUT -p tcp --dport 3000 -j DROP
 | `/api/admin/queue` | DELETE | Clear party queue |
 | `/api/admin/queue/:trackId` | DELETE | Remove specific track |
 | `/api/admin/reset-limits` | POST | Reset all track limits |
+| `/api/admin/toggle-limits` | POST | Enable/disable track limit enforcement |
 | `/api/admin/track-limits` | GET | Get all IP track counts |
 
 ## Security Best Practices

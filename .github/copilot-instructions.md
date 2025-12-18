@@ -33,6 +33,11 @@ Party Jukebox is a Node.js/Express web application that provides a collaborative
 ├── .env.example           # Environment variable template
 ├── public/
 │   └── index.html         # Single-page web interface
+├── scripts/               # Utility scripts
+│   ├── docker-start.sh    # Start Docker container
+│   ├── docker-stop.sh     # Stop Docker container
+│   ├── update_and_restart.sh  # Update code and restart service
+│   └── tag-release.sh     # Create version tags with semantic versioning
 ├── deploy/                # Deployment configurations
 │   ├── jukebox.service    # systemd service file
 │   ├── ecosystem.config.js # PM2 configuration
@@ -70,7 +75,10 @@ Required:
 
 Optional:
 - `PORT` (default: 3000) - HTTP server port
+- `APP_TITLE` (default: "Party JukeBox") - Application title
+- `APP_BYLINE` (default: "Your collaborative music queue") - Subtitle/tagline
 - `MAX_TRACKS_PER_IP` (default: 5) - Track limit per device
+- `ENFORCE_TRACK_LIMITS` (default: true) - Enable/disable track limit enforcement
 - `ADMIN_PASSWORD` - Enable host admin controls
 - `SSL_CERT_PATH` / `SSL_KEY_PATH` - HTTPS certificate paths
 - `SSL_PORT` (default: 443) / `SSL_HOST` (default: 0.0.0.0) - HTTPS config
@@ -97,12 +105,14 @@ Optional:
 - `GET /login` - Initiates Spotify OAuth flow
 - `GET /callback` - OAuth callback handler
 - `GET /api/status` - Authentication status check
+- `GET /api/config` - Get app configuration (title, byline, limits)
 - `GET /api/search?q=<query>` - Search Spotify tracks
-- `POST /api/queue` - Add track to queue (rate limited)
+- `POST /api/queue` - Add track to queue (rate limited, respects ENFORCE_TRACK_LIMITS)
 - `GET /api/party-queue` - Get queue with vote counts
 - `POST /api/vote/:trackId` - Upvote/downvote track
 - `GET /api/track-limit` - Get remaining track count for IP
 - `GET /api/playback` - Get current playback state
+- `GET /api/spotify-queue` - Get Spotify's actual queue (requires auth, 15s cache)
 - `GET /api/qrcode` - Generate QR code for sharing
 - `POST /api/logout` - Clear authentication tokens
 
@@ -115,6 +125,7 @@ Optional:
 - `DELETE /api/admin/queue` - Clear entire queue
 - `DELETE /api/admin/queue/:trackId` - Remove specific track
 - `POST /api/admin/reset-limits` - Reset all IP track limits
+- `POST /api/admin/toggle-limits` - Enable/disable track limit enforcement
 - `GET /api/admin/track-limits` - View all IP track counts
 
 ## Testing
