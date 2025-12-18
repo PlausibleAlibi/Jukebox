@@ -544,6 +544,13 @@ app.get('/api/party-queue', (req, res) => {
   const clientIP = getClientIP(req);
   const sortedQueue = [...partyQueue].sort((a, b) => b.votes - a.votes);
   
+  // Prevent browser caching of dynamic queue data
+  res.set({
+    'Cache-Control': 'no-store, no-cache, must-revalidate, private',
+    'Pragma': 'no-cache',
+    'Expires': '0'
+  });
+  
   res.json({
     queue: sortedQueue.map(track => ({
       ...track,
