@@ -40,6 +40,13 @@ if (USE_HTTPS) {
 const MAX_TRACKS_PER_IP = parseInt(process.env.MAX_TRACKS_PER_IP, 10) || 5;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
 
+// Application branding
+const APP_TITLE = process.env.APP_TITLE || 'Party JukeBox';
+const APP_BYLINE = process.env.APP_BYLINE || 'Your collaborative music queue';
+
+// Track limit enforcement (can be toggled by admin)
+let enforceTrackLimits = process.env.ENFORCE_TRACK_LIMITS !== 'false';
+
 // Rate limiting configuration
 const generalLimiter = rateLimit({
   windowMs: RATE_LIMIT_WINDOW_MS,
@@ -73,6 +80,13 @@ let userNicknames = {};
 
 // Playback state cache to reduce Spotify API calls
 let playbackCache = {
+  data: null,
+  timestamp: 0,
+  ttl: 15000 // 15 seconds cache TTL
+};
+
+// Spotify queue cache to reduce API calls
+let spotifyQueueCache = {
   data: null,
   timestamp: 0,
   ttl: 15000 // 15 seconds cache TTL
@@ -452,6 +466,16 @@ app.get('/api/status', (req, res) => {
   });
 });
 
+// Get app configuration
+app.get('/api/config', (req, res) => {
+  res.json({
+    appTitle: APP_TITLE,
+    appByline: APP_BYLINE,
+    maxTracksPerIP: MAX_TRACKS_PER_IP,
+    enforceTrackLimits: enforceTrackLimits
+  });
+});
+
 // Generate QR code for sharing the app URL
 app.get('/api/qrcode', async (req, res) => {
   try {
@@ -612,9 +636,9 @@ app.post('/api/queue', ensureToken, async (req, res) => {
     return res.status(400).json({ error: 'Track URI is required' });
   }
 
-  // Check track limit per IP
+  // Check track limit per IP (only if enforcement is enabled)
   const currentCount = ipTrackCount[clientIP] || 0;
-  if (currentCount >= MAX_TRACKS_PER_IP) {
+  if (enforceTrackLimits && currentCount >= MAX_TRACKS_PER_IP) {
     return res.status(429).json({ 
       error: `Track limit reached. You can only add ${MAX_TRACKS_PER_IP} tracks.`,
       remaining: 0
@@ -724,8 +748,9 @@ app.get('/api/party-queue', (req, res) => {
       ...track,
       hasVoted: trackVotes[track.id]?.has(clientIP) || false
     })),
-    remaining: MAX_TRACKS_PER_IP - (ipTrackCount[clientIP] || 0),
-    maxTracks: MAX_TRACKS_PER_IP
+    remaining: enforceTrackLimits ? MAX_TRACKS_PER_IP - (ipTrackCount[clientIP] || 0) : -1,
+    maxTracks: MAX_TRACKS_PER_IP,
+    enforceTrackLimits: enforceTrackLimits
   });
 });
 
@@ -774,8 +799,9 @@ app.get('/api/track-limit', (req, res) => {
   const currentCount = ipTrackCount[clientIP] || 0;
   res.json({
     used: currentCount,
-    remaining: MAX_TRACKS_PER_IP - currentCount,
-    max: MAX_TRACKS_PER_IP
+    remaining: enforceTrackLimits ? MAX_TRACKS_PER_IP - currentCount : -1,
+    max: MAX_TRACKS_PER_IP,
+    enforceTrackLimits: enforceTrackLimits
   });
 });
 
@@ -833,6 +859,80 @@ app.get('/api/playback', ensureToken, async (req, res) => {
   } catch (err) {
     logger.error('Spotify playback state error', { error: err.message });
     res.status(500).json({ error: 'Failed to get playback state' });
+  }
+});
+
+/**
+ * Get Spotify queue
+ * Returns the current Spotify queue with track details
+ * Uses caching with 15-second TTL to reduce API calls
+ */
+app.get('/api/spotify-queue', ensureToken, async (req, res) => {
+  try {
+    // Check cache first
+    const now = Date.now();
+    if (spotifyQueueCache.data && (now - spotifyQueueCache.timestamp) < spotifyQueueCache.ttl) {
+      logger.debug('Spotify queue: Serving from cache', {
+        cacheAge: Math.floor((now - spotifyQueueCache.timestamp) / 1000) + 's'
+      });
+      return res.json(spotifyQueueCache.data);
+    }
+
+    const response = await spotifyFetch('/me/player/queue');
+
+    logger.info('Spotify API: Get queue', {
+      endpoint: '/me/player/queue',
+      method: 'GET',
+      statusCode: response.status
+    });
+
+    if (response.status === 404) {
+      const result = { queue: [], currentlyPlaying: null };
+      spotifyQueueCache.data = result;
+      spotifyQueueCache.timestamp = now;
+      return res.status(404).json({ error: 'No active device found. Please start playing on Spotify first.' });
+    }
+
+    if (!response.ok) {
+      const errorMessage = await parseSpotifyErrorResponse(response, 'Failed to get queue');
+      logger.error('Spotify API: Get queue failed', {
+        endpoint: '/me/player/queue',
+        statusCode: response.status,
+        error: errorMessage
+      });
+      return res.status(response.status).json({ error: errorMessage });
+    }
+
+    const data = await response.json();
+    
+    // Format queue data
+    const result = {
+      currentlyPlaying: data.currently_playing ? {
+        id: data.currently_playing.id,
+        name: data.currently_playing.name,
+        artist: data.currently_playing.artists?.map(a => a.name).join(', ') || 'Unknown',
+        album: data.currently_playing.album?.name || '',
+        albumArt: data.currently_playing.album?.images?.[0]?.url || null,
+        duration: data.currently_playing.duration_ms
+      } : null,
+      queue: (data.queue || []).map(track => ({
+        id: track.id,
+        name: track.name,
+        artist: track.artists?.map(a => a.name).join(', ') || 'Unknown',
+        album: track.album?.name || '',
+        albumArt: track.album?.images?.[0]?.url || null,
+        duration: track.duration_ms
+      }))
+    };
+    
+    // Update cache
+    spotifyQueueCache.data = result;
+    spotifyQueueCache.timestamp = now;
+    
+    res.json(result);
+  } catch (err) {
+    logger.error('Spotify queue error', { error: err.message });
+    res.status(500).json({ error: 'Failed to get Spotify queue' });
   }
 });
 
@@ -1065,6 +1165,34 @@ app.post('/api/admin/play', requireAdmin, ensureToken, async (req, res) => {
     logger.error('Admin resume playback error', { error: err.message, clientIP });
     res.status(500).json({ error: 'Failed to resume playback' });
   }
+});
+
+/**
+ * Admin: Toggle track limit enforcement
+ * Allows admin to dynamically enable/disable track limits
+ */
+app.post('/api/admin/toggle-limits', requireAdmin, (req, res) => {
+  const clientIP = getClientIP(req);
+  const { enabled } = req.body;
+  
+  // If enabled is provided, set to that value; otherwise toggle
+  if (typeof enabled === 'boolean') {
+    enforceTrackLimits = enabled;
+  } else {
+    enforceTrackLimits = !enforceTrackLimits;
+  }
+  
+  logger.info('Admin action: Toggle track limits', {
+    action: 'toggle_limits',
+    enforceTrackLimits,
+    clientIP
+  });
+  
+  res.json({ 
+    success: true, 
+    enforceTrackLimits,
+    message: enforceTrackLimits ? 'Track limits enabled' : 'Track limits disabled'
+  });
 });
 
 // Serve the main page
