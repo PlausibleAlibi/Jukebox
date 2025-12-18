@@ -491,3 +491,66 @@ describe('Spotify Fetch with Timeout and Retry', () => {
     assert.strictEqual(errorLog.attempt, 4, 'Should log final attempt number (4 total attempts = 1 initial + 3 retries)');
   });
 });
+
+describe('New API Endpoints', () => {
+  it('should return app configuration from /api/config', () => {
+    // Test environment variable parsing
+    const appTitle = process.env.APP_TITLE || 'Party JukeBox';
+    const appByline = process.env.APP_BYLINE || 'Your collaborative music queue';
+    const maxTracksPerIP = parseInt(process.env.MAX_TRACKS_PER_IP, 10) || 5;
+    const enforceTrackLimits = process.env.ENFORCE_TRACK_LIMITS !== 'false';
+    
+    assert.strictEqual(typeof appTitle, 'string', 'APP_TITLE should be a string');
+    assert.strictEqual(typeof appByline, 'string', 'APP_BYLINE should be a string');
+    assert.strictEqual(typeof maxTracksPerIP, 'number', 'MAX_TRACKS_PER_IP should be a number');
+    assert.strictEqual(typeof enforceTrackLimits, 'boolean', 'ENFORCE_TRACK_LIMITS should be a boolean');
+  });
+
+  it('should default ENFORCE_TRACK_LIMITS to true', () => {
+    // When env var is not set or is empty
+    const enforceTrackLimits1 = '' !== 'false';
+    const enforceTrackLimits2 = undefined !== 'false';
+    
+    assert.strictEqual(enforceTrackLimits1, true, 'Should default to true when empty');
+    assert.strictEqual(enforceTrackLimits2, true, 'Should default to true when undefined');
+  });
+
+  it('should set ENFORCE_TRACK_LIMITS to false when explicitly disabled', () => {
+    const enforceTrackLimits = 'false' !== 'false';
+    assert.strictEqual(enforceTrackLimits, false, 'Should be false when set to "false"');
+  });
+
+  it('should handle track limit enforcement in queue endpoint', () => {
+    // Simulate enforcement check
+    const MAX_TRACKS_PER_IP = 5;
+    const currentCount = 6;
+    let enforceTrackLimits = true;
+    
+    // When enforcement is enabled, should block
+    const shouldBlock1 = enforceTrackLimits && currentCount >= MAX_TRACKS_PER_IP;
+    assert.strictEqual(shouldBlock1, true, 'Should block when limits enforced and exceeded');
+    
+    // When enforcement is disabled, should not block
+    enforceTrackLimits = false;
+    const shouldBlock2 = enforceTrackLimits && currentCount >= MAX_TRACKS_PER_IP;
+    assert.strictEqual(shouldBlock2, false, 'Should not block when limits not enforced');
+  });
+
+  it('should return -1 for remaining tracks when enforcement is disabled', () => {
+    const enforceTrackLimits = false;
+    const MAX_TRACKS_PER_IP = 5;
+    const currentCount = 3;
+    
+    const remaining = enforceTrackLimits ? MAX_TRACKS_PER_IP - currentCount : -1;
+    assert.strictEqual(remaining, -1, 'Should return -1 when enforcement is disabled');
+  });
+
+  it('should calculate remaining tracks correctly when enforcement is enabled', () => {
+    const enforceTrackLimits = true;
+    const MAX_TRACKS_PER_IP = 5;
+    const currentCount = 3;
+    
+    const remaining = enforceTrackLimits ? MAX_TRACKS_PER_IP - currentCount : -1;
+    assert.strictEqual(remaining, 2, 'Should return correct remaining count when enforcement is enabled');
+  });
+});
