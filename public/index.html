@@ -6,28 +6,28 @@
   <meta name="theme-color" content="#1a1a2e">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <title>Party Jukebox</title>
+  <title>Brooklyn's JukeBox - New Year's Eve 🎉</title>
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
-    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,Ubuntu,sans-serif;background:linear-gradient(135deg,#1a1a2e 0%,#16213e 100%);min-height:100vh;color:#fff;-webkit-font-smoothing:antialiased}
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,Ubuntu,sans-serif;background:linear-gradient(135deg,#0a0a0a 0%,#1a1a1a 50%,#2a2520 100%);min-height:100vh;color:#fff;-webkit-font-smoothing:antialiased}
     .container{max-width:600px;margin:0 auto;padding:16px;padding-bottom:80px}
-    header{text-align:center;padding:16px 0;border-bottom:1px solid rgba(255,255,255,0.1);margin-bottom:16px}
+    header{text-align:center;padding:16px 0;border-bottom:1px solid rgba(255,215,0,0.2);margin-bottom:16px}
     h1{font-size:1.75rem;margin-bottom:4px}
-    h1 span{color:#1DB954}
+    h1 span{color:#FFD700}
     .subtitle{color:rgba(255,255,255,0.6);font-size:0.85rem}
     .status-bar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;background:rgba(255,255,255,0.05);padding:10px 12px;border-radius:8px;margin-bottom:16px}
     .status-indicator{display:flex;align-items:center;gap:8px}
     .status-dot{width:8px;height:8px;border-radius:50%;background:#ff4444;flex-shrink:0}
-    .status-dot.connected{background:#1DB954}
-    .btn{background:#1DB954;color:#fff;border:none;padding:8px 16px;border-radius:20px;cursor:pointer;font-size:0.85rem;text-decoration:none;display:inline-flex;align-items:center;gap:6px;transition:background 0.2s}
-    .btn:hover{background:#1ed760}
+    .status-dot.connected{background:#FFD700}
+    .btn{background:#FFD700;color:#000;border:none;padding:8px 16px;border-radius:20px;cursor:pointer;font-size:0.85rem;font-weight:600;text-decoration:none;display:inline-flex;align-items:center;gap:6px;transition:background 0.2s}
+    .btn:hover{background:#FFC700}
     .btn-secondary{background:rgba(255,255,255,0.1)}
     .btn-secondary:hover{background:rgba(255,255,255,0.2)}
     .btn:disabled{background:rgba(255,255,255,0.2);cursor:not-allowed}
     .track-limit{background:rgba(255,255,255,0.05);padding:8px 12px;border-radius:6px;margin-bottom:16px;font-size:0.85rem;display:flex;justify-content:space-between;align-items:center}
     .track-limit-bar{width:100px;height:6px;background:rgba(255,255,255,0.1);border-radius:3px;overflow:hidden}
-    .track-limit-fill{height:100%;background:#1DB954;transition:width 0.3s}
-    .now-playing{background:rgba(29,185,84,0.1);border:1px solid rgba(29,185,84,0.3);border-radius:12px;padding:12px;margin-bottom:16px;display:none}
+    .track-limit-fill{height:100%;background:#FFD700;transition:width 0.3s}
+    .now-playing{background:rgba(255,215,0,0.1);border:1px solid rgba(255,215,0,0.3);border-radius:12px;padding:12px;margin-bottom:16px;display:none}
     .now-playing.visible{display:flex;align-items:center;gap:12px}
     .now-playing-art{width:56px;height:56px;border-radius:8px;object-fit:cover;flex-shrink:0}
     .now-playing-info{flex:1;min-width:0}
@@ -39,12 +39,12 @@
     .search-input{flex:1;padding:14px 16px;border-radius:25px;border:none;background:rgba(255,255,255,0.1);color:#fff;font-size:1rem;outline:none;min-width:0}
     .search-input::placeholder{color:rgba(255,255,255,0.5)}
     .search-input:focus{background:rgba(255,255,255,0.15)}
-    .search-btn{padding:14px 20px;border-radius:25px;border:none;background:#1DB954;color:#fff;font-size:1rem;cursor:pointer;white-space:nowrap}
-    .search-btn:hover{background:#1ed760}
+    .search-btn{padding:14px 20px;border-radius:25px;border:none;background:#FFD700;color:#000;font-size:1rem;font-weight:600;cursor:pointer;white-space:nowrap}
+    .search-btn:hover{background:#FFC700}
     .search-btn:disabled{background:rgba(255,255,255,0.2);cursor:not-allowed}
     .tabs{display:flex;gap:8px;margin-bottom:16px;overflow-x:auto;-webkit-overflow-scrolling:touch}
     .tab{padding:8px 16px;border-radius:20px;background:rgba(255,255,255,0.05);color:rgba(255,255,255,0.7);cursor:pointer;white-space:nowrap;border:none;font-size:0.85rem}
-    .tab.active{background:#1DB954;color:#fff}
+    .tab.active{background:#FFD700;color:#000;font-weight:600}
     .tab-content{display:none}
     .tab-content.active{display:block}
     .results,.queue-list{display:flex;flex-direction:column;gap:8px}
@@ -56,16 +56,16 @@
     .track-artist{color:rgba(255,255,255,0.7);font-size:0.85rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .track-album{color:rgba(255,255,255,0.5);font-size:0.75rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .track-actions{display:flex;gap:6px;align-items:center;flex-shrink:0}
-    .add-btn{background:#1DB954;color:#fff;border:none;padding:8px 14px;border-radius:16px;cursor:pointer;font-weight:600;font-size:0.8rem;transition:all 0.2s}
-    .add-btn:hover{background:#1ed760}
+    .add-btn{background:#FFD700;color:#000;border:none;padding:8px 14px;border-radius:16px;cursor:pointer;font-weight:600;font-size:0.8rem;transition:all 0.2s}
+    .add-btn:hover{background:#FFC700}
     .add-btn:disabled{background:rgba(255,255,255,0.2);cursor:not-allowed}
-    .add-btn.added{background:rgba(29,185,84,0.3)}
+    .add-btn.added{background:rgba(255,215,0,0.3);color:#FFD700}
     .vote-btn{background:rgba(255,255,255,0.1);color:#fff;border:none;padding:6px 10px;border-radius:12px;cursor:pointer;font-size:0.8rem;display:flex;align-items:center;gap:4px;transition:all 0.2s}
     .vote-btn:hover{background:rgba(255,255,255,0.2)}
-    .vote-btn.voted{background:rgba(29,185,84,0.3);color:#1DB954}
+    .vote-btn.voted{background:rgba(255,215,0,0.3);color:#FFD700}
     .message{text-align:center;padding:32px 16px;color:rgba(255,255,255,0.6)}
     .error-message{background:rgba(255,68,68,0.1);border:1px solid rgba(255,68,68,0.3);color:#ff6b6b;padding:12px;border-radius:8px;margin-bottom:16px;text-align:center;font-size:0.9rem}
-    .success-toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#1DB954;color:#fff;padding:12px 20px;border-radius:25px;font-weight:600;opacity:0;transition:opacity 0.3s;z-index:1000;font-size:0.9rem}
+    .success-toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#FFD700;color:#000;padding:12px 20px;border-radius:25px;font-weight:600;opacity:0;transition:opacity 0.3s;z-index:1000;font-size:0.9rem}
     .success-toast.visible{opacity:1}
     .host-section{text-align:center;padding:40px 16px}
     .host-section h2{margin-bottom:8px}
@@ -74,6 +74,7 @@
     .config-warning h3{margin-bottom:8px}
     .config-warning code{background:rgba(0,0,0,0.3);padding:2px 6px;border-radius:4px}
     .config-warning ol{margin-left:20px;margin-top:8px}
+    .config-warning a{color:#FFD700}
     .qr-section{text-align:center;padding:16px;background:rgba(255,255,255,0.05);border-radius:12px;margin-bottom:16px}
     .qr-section h3{margin-bottom:12px;font-size:0.9rem;color:rgba(255,255,255,0.8)}
     .qr-code{max-width:200px;margin:0 auto 12px}
@@ -84,6 +85,7 @@
     .admin-controls{display:flex;flex-wrap:wrap;gap:8px}
     .admin-login{display:flex;gap:8px}
     .admin-input{flex:1;padding:10px;border-radius:8px;border:none;background:rgba(255,255,255,0.1);color:#fff;font-size:0.9rem}
+    .footer{text-align:center;padding:32px 16px 16px 16px;color:rgba(255,255,255,0.4);font-size:0.8rem;border-top:1px solid rgba(255,215,0,0.1);margin-top:32px}
     @media(max-width:480px){
       .search-box{flex-direction:column}
       .search-btn{width:100%}
@@ -97,8 +99,8 @@
 <body>
   <div class="container">
     <header>
-      <h1>🎵 Party <span>Jukebox</span></h1>
-      <p class="subtitle">Search and add songs to the queue</p>
+      <h1>🎉 Brooklyn's <span>JukeBox</span> ✨</h1>
+      <p class="subtitle">🥂 Ring in the New Year with music 🎊</p>
     </header>
 
     <div class="status-bar">
@@ -115,7 +117,7 @@
       <h3>⚠️ Configuration Required</h3>
       <p>Spotify credentials are not configured. The host needs to:</p>
       <ol>
-        <li>Create a Spotify app at <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener" style="color:#1DB954;">developer.spotify.com</a></li>
+        <li>Create a Spotify app at <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener">developer.spotify.com</a></li>
         <li>Set environment variables: <code>SPOTIFY_CLIENT_ID</code> and <code>SPOTIFY_CLIENT_SECRET</code></li>
         <li>Restart the server</li>
       </ol>
@@ -146,7 +148,7 @@
 
       <div class="tabs">
         <button class="tab active" data-tab="search">🔍 Search</button>
-        <button class="tab" data-tab="queue">📋 Queue</button>
+        <button class="tab" data-tab="queue">🎶 Queue</button>
         <button class="tab" data-tab="qr">📱 Share</button>
         <button class="tab" data-tab="admin">⚙️ Admin</button>
       </div>
@@ -171,7 +173,7 @@
 
       <div id="qrTab" class="tab-content">
         <div class="qr-section">
-          <h3>📱 Scan to Join the Party!</h3>
+          <h3>📱 Scan to Join the New Year's Party! 🎉</h3>
           <div class="qr-code" id="qrCode">
             <div class="message">Loading QR code...</div>
           </div>
@@ -208,6 +210,10 @@
     </div>
 
     <div id="toast" class="success-toast">Added to queue!</div>
+
+    <div class="footer">
+      ✨ powered by Tucker ✨
+    </div>
   </div>
 
   <script>

@@ -76,7 +76,7 @@ describe('Party Jukebox Server', () => {
     });
 
     assert.strictEqual(response.statusCode, 200);
-    assert.ok(response.body.includes('Party Jukebox'));
+    assert.ok(response.body.includes('Brooklyn\'s JukeBox'));
   });
 
   it('should return status endpoint', async () => {
