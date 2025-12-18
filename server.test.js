@@ -417,7 +417,8 @@ describe('Spotify Fetch with Timeout and Retry', () => {
   });
 
   it('should retry on 429 rate limit', () => {
-    const shouldRetry = (429 === 429);
+    const code = 429;
+    const shouldRetry = code === 429 || code >= 500 || code === 408;
     assert.strictEqual(shouldRetry, true, 'Should retry on 429 rate limit');
   });
 

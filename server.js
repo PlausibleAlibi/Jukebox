@@ -263,9 +263,8 @@ async function spotifyFetch(endpoint, options = {}) {
       // Determine if we should retry
       const shouldRetry = (
         response.status === 429 || // Rate limit
-        response.status >= 500 || // Server errors
-        response.status === 408 || // Request timeout
-        response.status === 503    // Service unavailable
+        response.status >= 500 || // Server errors (includes 500, 502, 503, 504, etc.)
+        response.status === 408    // Request timeout
       );
       
       if (!shouldRetry) {
