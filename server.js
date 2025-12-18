@@ -225,18 +225,107 @@ app.use(express.static(path.join(__dirname, 'public')));
 const MORGAN_FORMAT = ':remote-addr - :method :url :status :res[content-length] - :response-time ms';
 app.use(morgan(MORGAN_FORMAT, { stream: logger.stream }));
 
-// Helper function to make Spotify API requests
+// Helper function to make Spotify API requests with timeout and retry logic
 async function spotifyFetch(endpoint, options = {}) {
   const url = endpoint.startsWith('http') ? endpoint : `https://api.spotify.com/v1${endpoint}`;
-  const response = await fetch(url, {
-    ...options,
-    headers: {
-      'Authorization': `Bearer ${tokenData.accessToken}`,
-      'Content-Type': 'application/json',
-      ...options.headers
+  const maxRetries = 3;
+  const timeoutMs = 10000; // 10 seconds
+  
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    
+    try {
+      const response = await fetch(url, {
+        ...options,
+        headers: {
+          'Authorization': `Bearer ${tokenData.accessToken}`,
+          'Content-Type': 'application/json',
+          ...options.headers
+        },
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeoutId);
+      
+      // Check if we should retry based on status code
+      if (response.ok || attempt === maxRetries) {
+        // Success or final attempt - return response
+        if (attempt > 0) {
+          logger.info(`Spotify API call succeeded after ${attempt} retries`, { 
+            endpoint: url, 
+            statusCode: response.status 
+          });
+        }
+        return response;
+      }
+      
+      // Determine if we should retry
+      const shouldRetry = (
+        response.status === 429 || // Rate limit
+        response.status >= 500 || // Server errors
+        response.status === 408 || // Request timeout
+        response.status === 503    // Service unavailable
+      );
+      
+      if (!shouldRetry) {
+        // Don't retry on 4xx client errors (except 429)
+        logger.warn(`Spotify API call failed with non-retryable status`, { 
+          endpoint: url, 
+          statusCode: response.status,
+          attempt: attempt + 1
+        });
+        return response;
+      }
+      
+      // Log retry attempt
+      logger.warn(`Spotify API call failed, will retry`, { 
+        endpoint: url, 
+        statusCode: response.status,
+        attempt: attempt + 1,
+        maxRetries: maxRetries
+      });
+      
+      // Wait before retrying with exponential backoff
+      const delayMs = Math.pow(2, attempt) * 1000; // 1s, 2s, 4s
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+      
+    } catch (err) {
+      clearTimeout(timeoutId);
+      
+      // Check if this is a timeout/network error that should be retried
+      const isRetryable = (
+        err.name === 'AbortError' || // Timeout
+        err.message.includes('fetch failed') || // Network error
+        err.message.includes('ECONNRESET') ||
+        err.message.includes('ETIMEDOUT')
+      );
+      
+      if (!isRetryable || attempt === maxRetries) {
+        // Don't retry or final attempt - throw error
+        logger.error(`Spotify API call failed after ${attempt + 1} attempts`, { 
+          endpoint: url,
+          error: err.message,
+          errorName: err.name,
+          attempt: attempt + 1
+        });
+        throw err;
+      }
+      
+      // Log retry attempt
+      logger.warn(`Spotify API call failed with network error, will retry`, { 
+        endpoint: url,
+        error: err.message,
+        errorName: err.name,
+        attempt: attempt + 1,
+        maxRetries: maxRetries
+      });
+      
+      // Wait before retrying with exponential backoff
+      const delayMs = Math.pow(2, attempt) * 1000; // 1s, 2s, 4s
+      await new Promise(resolve => setTimeout(resolve, delayMs));
     }
-  });
-  return response;
+  }
 }
 
 /**
