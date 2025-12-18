@@ -55,6 +55,7 @@
     .track-name{font-weight:600;font-size:0.95rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .track-artist{color:rgba(255,255,255,0.7);font-size:0.85rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .track-album{color:rgba(255,255,255,0.5);font-size:0.75rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .track-added-by{color:rgba(255,255,255,0.5);font-size:0.75rem;margin-top:2px}
     .track-actions{display:flex;gap:6px;align-items:center;flex-shrink:0}
     .add-btn{background:#FFD700;color:#000;border:none;padding:8px 14px;border-radius:16px;cursor:pointer;font-weight:600;font-size:0.8rem;transition:all 0.2s}
     .add-btn:hover{background:#FFC700}
@@ -86,6 +87,16 @@
     .admin-login{display:flex;gap:8px}
     .admin-input{flex:1;padding:10px;border-radius:8px;border:none;background:rgba(255,255,255,0.1);color:#fff;font-size:0.9rem}
     .footer{text-align:center;padding:32px 16px 16px 16px;color:rgba(255,255,255,0.4);font-size:0.8rem;border-top:1px solid rgba(255,215,0,0.1);margin-top:32px}
+    .nickname-modal{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);display:flex;align-items:center;justify-content:center;z-index:2000;backdrop-filter:blur(4px)}
+    .nickname-modal-content{background:linear-gradient(135deg,#1a1a2e 0%,#2a2520 100%);padding:32px;border-radius:16px;max-width:400px;width:90%;text-align:center;border:1px solid rgba(255,215,0,0.2)}
+    .nickname-modal h2{margin-bottom:8px;color:#FFD700}
+    .nickname-modal p{color:rgba(255,255,255,0.7);margin-bottom:20px;font-size:0.9rem}
+    .nickname-modal input{width:100%;padding:14px 16px;border-radius:25px;border:none;background:rgba(255,255,255,0.1);color:#fff;font-size:1rem;margin-bottom:16px;outline:none}
+    .nickname-modal input::placeholder{color:rgba(255,255,255,0.5)}
+    .nickname-modal input:focus{background:rgba(255,255,255,0.15)}
+    .nickname-modal button{width:100%;padding:14px 20px;border-radius:25px;border:none;background:#FFD700;color:#000;font-size:1rem;font-weight:600;cursor:pointer}
+    .nickname-modal button:hover{background:#FFC700}
+    .admin-help-text{color:rgba(255,255,255,0.6);font-size:0.75rem;margin-bottom:12px;line-height:1.4}
     @media(max-width:480px){
       .search-box{flex-direction:column}
       .search-btn{width:100%}
@@ -97,6 +108,16 @@
   </style>
 </head>
 <body>
+  <!-- Nickname Modal -->
+  <div id="nicknameModal" class="nickname-modal" style="display:none;">
+    <div class="nickname-modal-content">
+      <h2>🎉 Welcome to the Party!</h2>
+      <p>What should we call you?</p>
+      <input type="text" id="nicknameInput" placeholder="Enter your nickname" maxlength="20" autocomplete="off">
+      <button id="nicknameSubmit">Let's Go!</button>
+    </div>
+  </div>
+
   <div class="container">
     <header>
       <h1>🎉 Brooklyn's <span>JukeBox</span> ✨</h1>
@@ -123,11 +144,13 @@
       </ol>
     </div>
 
+    <!--
     <div id="hostSection" class="host-section" style="display:none;">
       <h2>Welcome, Host!</h2>
       <p>Connect your Spotify account to let guests add songs to your queue.</p>
       <a href="/login" class="btn">Connect Spotify</a>
     </div>
+    -->
 
     <div id="mainContent" style="display:none;">
       <div id="trackLimitBar" class="track-limit">
@@ -193,11 +216,15 @@
           </div>
           <div id="adminControls" style="display:none;">
             <p style="color:rgba(255,255,255,0.6);margin-bottom:12px;font-size:0.85rem;">Logged in as admin</p>
+            <div class="admin-help-text">
+              <strong>Clear Display Queue</strong> removes songs from the voting list (doesn't affect Spotify playback)<br>
+              <strong>Reset Limits</strong> allows all users to add more tracks
+            </div>
             <div class="admin-controls">
               <button class="btn" onclick="adminSkip()">⏭️ Skip</button>
               <button class="btn" onclick="adminPause()">⏸️ Pause</button>
               <button class="btn" onclick="adminPlay()">▶️ Play</button>
-              <button class="btn btn-secondary" onclick="adminClearQueue()">🗑️ Clear Queue</button>
+              <button class="btn btn-secondary" onclick="adminClearQueue()">🗑️ Clear Display Queue</button>
               <button class="btn btn-secondary" onclick="adminResetLimits()">🔄 Reset Limits</button>
               <button class="btn btn-secondary" onclick="adminLogout()">Logout</button>
             </div>
@@ -219,6 +246,7 @@
   <script>
     // State
     let adminToken = sessionStorage.getItem('adminToken') || '';
+    let userNickname = sessionStorage.getItem('userNickname') || '';
     let trackLimit = { used: 0, remaining: 5, max: 5 };
     let queueRefreshInterval = null;
     let activeTab = 'search'; // Matches the default active tab in HTML
@@ -243,6 +271,32 @@
     const tracksRemaining = document.getElementById('tracksRemaining');
     const tracksMax = document.getElementById('tracksMax');
     const trackLimitFill = document.getElementById('trackLimitFill');
+    const nicknameModal = document.getElementById('nicknameModal');
+    const nicknameInput = document.getElementById('nicknameInput');
+    const nicknameSubmit = document.getElementById('nicknameSubmit');
+
+    // Show nickname modal on first visit
+    if (!userNickname) {
+      nicknameModal.style.display = 'flex';
+    }
+
+    // Handle nickname submission
+    nicknameSubmit.addEventListener('click', () => {
+      const nickname = nicknameInput.value.trim();
+      if (nickname) {
+        userNickname = nickname;
+        sessionStorage.setItem('userNickname', nickname);
+        nicknameModal.style.display = 'none';
+        showToast('Welcome, ' + nickname + '! 🎉');
+      }
+    });
+
+    // Allow Enter key to submit nickname
+    nicknameInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        nicknameSubmit.click();
+      }
+    });
 
     // Check for URL parameters
     const urlParams = new URLSearchParams(window.location.search);
@@ -311,7 +365,7 @@
           statusText.textContent = 'Connected';
           authActions.innerHTML = '<button class="btn btn-secondary" onclick="logout()">Disconnect</button>';
           mainContent.style.display = 'block';
-          hostSection.style.display = 'none';
+          // hostSection.style.display = 'none'; // Commented out - redundant
           updateNowPlaying();
           updateTrackLimit();
           setInterval(updateNowPlaying, 20000); // Poll every 20 seconds
@@ -320,7 +374,7 @@
           statusDot.classList.remove('connected');
           statusText.textContent = 'Not connected';
           authActions.innerHTML = '<a href="/login" class="btn">Connect</a>';
-          hostSection.style.display = 'block';
+          // hostSection.style.display = 'block'; // Commented out - redundant
           mainContent.style.display = 'none';
         }
       } catch (err) {
@@ -405,7 +459,7 @@
         const response = await fetch('/api/queue', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ uri, name, artist, albumArt })
+          body: JSON.stringify({ uri, name, artist, albumArt, nickname: userNickname })
         });
 
         const data = await response.json();
@@ -449,6 +503,7 @@
             <div class="track-info">
               <div class="track-name">${escapeHtml(track.name)}</div>
               <div class="track-artist">${escapeHtml(track.artist)}</div>
+              <div class="track-added-by">Added by: ${escapeHtml(track.addedByName || 'Guest')}</div>
             </div>
             <div class="track-actions">
               <button class="vote-btn ${track.hasVoted ? 'voted' : ''}" onclick="voteTrack('${track.id}', this)">

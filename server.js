@@ -68,6 +68,8 @@ let ipTrackCount = {};
 let trackVotes = {};
 // Admin session tokens (simple session management)
 let adminSessions = new Set();
+// User nicknames: { ip: nickname }
+let userNicknames = {};
 
 // Playback state cache to reduce Spotify API calls
 let playbackCache = {
@@ -603,7 +605,7 @@ app.get('/api/search', ensureToken, async (req, res) => {
 
 // Add track to queue
 app.post('/api/queue', ensureToken, async (req, res) => {
-  const { uri, name, artist, albumArt } = req.body;
+  const { uri, name, artist, albumArt, nickname } = req.body;
   const clientIP = getClientIP(req);
 
   if (!uri) {
@@ -638,6 +640,11 @@ app.post('/api/queue', ensureToken, async (req, res) => {
       // Track submission count
       ipTrackCount[clientIP] = currentCount + 1;
       
+      // Store nickname if provided
+      if (nickname) {
+        userNicknames[clientIP] = nickname;
+      }
+      
       // Add to party queue for voting display
       // Extract track ID from Spotify URI (format: spotify:track:XXXXX)
       const uriParts = uri.split(':');
@@ -650,6 +657,7 @@ app.post('/api/queue', ensureToken, async (req, res) => {
           artist: artist || 'Unknown',
           albumArt: albumArt || null,
           addedBy: clientIP,
+          addedByName: userNicknames[clientIP] || nickname || 'Guest',
           addedAt: Date.now(),
           votes: 0
         });
@@ -660,6 +668,7 @@ app.post('/api/queue', ensureToken, async (req, res) => {
           trackName: name,
           artist,
           clientIP,
+          addedByName: userNicknames[clientIP] || nickname || 'Guest',
           queueSize: partyQueue.length
         });
       }
