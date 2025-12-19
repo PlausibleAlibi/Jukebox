@@ -124,7 +124,8 @@ function createTables() {
 /**
  * Add track to party queue
  * @param {Object} track - Track object with id, uri, name, artist, albumArt, addedBy, addedByName, addedAt
- * @returns {boolean} Success status
+ * @returns {boolean} Success status (false if track already exists for this user)
+ * @note Uses UNIQUE constraint on (track_id, added_by_ip) - same user can't add same track twice
  */
 function addToPartyQueue(track) {
   try {
@@ -416,11 +417,11 @@ function incrementUserTrackCount(ip) {
       VALUES (?, 1, ?, ?)
       ON CONFLICT(ip_address) DO UPDATE SET
         track_count = track_count + 1,
-        last_request = ?,
-        updated_at = ?
+        last_request = excluded.last_request,
+        updated_at = excluded.updated_at
     `);
     
-    stmt.run(ip, now, now, now, now);
+    stmt.run(ip, now, now);
     
     const newCount = getUserTrackCount(ip);
     
@@ -500,12 +501,12 @@ function setUserNickname(ip, nickname) {
       INSERT INTO user_sessions (ip_address, track_count, nickname, last_request, updated_at)
       VALUES (?, 0, ?, ?, ?)
       ON CONFLICT(ip_address) DO UPDATE SET
-        nickname = ?,
-        last_request = ?,
-        updated_at = ?
+        nickname = excluded.nickname,
+        last_request = excluded.last_request,
+        updated_at = excluded.updated_at
     `);
     
-    stmt.run(ip, nickname, now, now, nickname, now, now);
+    stmt.run(ip, nickname, now, now);
     
     logger.debug('Nickname set for user', { ip, nickname });
   } catch (err) {
@@ -742,11 +743,12 @@ function addToPlaybackHistory(track, playedAt = Date.now()) {
       playedAt
     });
   } catch (err) {
-    logger.error('Failed to add to playback history', { 
+    // Log at warning level since this affects analytics
+    logger.warn('Failed to add to playback history', { 
       error: err.message,
       trackId: track.id || track.track_id
     });
-    // Don't throw - playback history is not critical
+    // Don't throw - playback history is not critical for app functionality
   }
 }
 

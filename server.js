@@ -945,28 +945,31 @@ app.post('/api/queue', ensureToken, async (req, res) => {
 
   try {
     // Check track limit per IP (only if enforcement is enabled)
-    const currentCount = db.getUserTrackCount(clientIP);
-    if (enforceTrackLimits && currentCount >= MAX_TRACKS_PER_IP) {
-      logger.warn('Track limit hit', {
+    let currentCount = 0;
+    if (enforceTrackLimits) {
+      currentCount = db.getUserTrackCount(clientIP);
+      if (currentCount >= MAX_TRACKS_PER_IP) {
+        logger.warn('Track limit hit', {
+          clientIP,
+          currentCount,
+          maxTracks: MAX_TRACKS_PER_IP,
+          enforceTrackLimits
+        });
+        return res.status(429).json({ 
+          error: `Track limit reached. You can only add ${MAX_TRACKS_PER_IP} tracks.`,
+          remaining: 0
+        });
+      }
+      
+      // Log track limit check at verbose level
+      logger.verbose('Track limit check', {
         clientIP,
         currentCount,
         maxTracks: MAX_TRACKS_PER_IP,
+        remaining: MAX_TRACKS_PER_IP - currentCount,
         enforceTrackLimits
       });
-      return res.status(429).json({ 
-        error: `Track limit reached. You can only add ${MAX_TRACKS_PER_IP} tracks.`,
-        remaining: 0
-      });
     }
-    
-    // Log track limit check at verbose level
-    logger.verbose('Track limit check', {
-      clientIP,
-      currentCount,
-      maxTracks: MAX_TRACKS_PER_IP,
-      remaining: MAX_TRACKS_PER_IP - currentCount,
-      enforceTrackLimits
-    });
 
     const response = await spotifyFetch(`/me/player/queue?uri=${encodeURIComponent(uri)}`, {
       method: 'POST'
@@ -1594,7 +1597,19 @@ app.delete('/api/admin/queue/:trackId', requireAdmin, (req, res) => {
     }
     
     const previousQueueSize = queue.length;
-    db.removeFromPartyQueue(trackId);
+    const removed = db.removeFromPartyQueue(trackId);
+    
+    if (!removed) {
+      logger.error('Failed to remove track from queue', {
+        trackId,
+        clientIP,
+        reason: 'Database removal failed'
+      });
+      return res.status(500).json({ error: 'Failed to remove track from queue' });
+    }
+    
+    // Get actual queue size after removal
+    const newQueueSize = db.getPartyQueue().length;
     
     logger.info('Party queue: Track removed', {
       trackId,
@@ -1604,7 +1619,7 @@ app.delete('/api/admin/queue/:trackId', requireAdmin, (req, res) => {
       removedByIP: clientIP,
       reason: 'admin_action',
       previousQueueSize,
-      newQueueSize: previousQueueSize - 1,
+      newQueueSize: newQueueSize,
       hadVotes: removedTrack.votes || 0
     });
     
