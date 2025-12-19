@@ -57,6 +57,8 @@ services:
       - ./certs:/app/certs:ro
       # Mount logs directory to persist logs outside the container
       - ./logs:/app/logs
+      # Mount data directory to persist database outside the container
+      - ./data:/app/data
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "--no-check-certificate", "https://localhost:443/api/status"]
       interval: 30s

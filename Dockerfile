@@ -1,6 +1,6 @@
 # Party Jukebox Dockerfile
 # Build: docker build -t jukebox .
-# Run: docker run -p 443:443 --env-file .env -v ./certs:/app/certs:ro -v ./logs:/app/logs jukebox
+# Run: docker run -p 443:443 --env-file .env -v ./certs:/app/certs:ro -v ./logs:/app/logs -v ./data:/app/data jukebox
 #
 # HTTPS Configuration:
 # This container runs on HTTPS port 443 by default.
@@ -12,13 +12,14 @@
 # Volume Mounts:
 #   - ./certs:/app/certs:ro  - SSL certificates (read-only)
 #   - ./logs:/app/logs       - Application logs (persistent)
+#   - ./data:/app/data       - SQLite database (persistent)
 #
 # Log Directory Permissions:
 # The container runs as a non-root user 'jukebox' (UID 1001) for security.
-# Before running, ensure the host logs directory is writable:
-#   mkdir -p logs && sudo chown 1001:1001 logs
+# Before running, ensure the host logs and data directories are writable:
+#   mkdir -p logs data && sudo chown 1001:1001 logs data
 # Alternative (less secure):
-#   mkdir -p logs && chmod 775 logs
+#   mkdir -p logs data && chmod 775 logs data
 
 FROM node:20-alpine
 
@@ -37,8 +38,10 @@ RUN npm ci --only=production && npm cache clean --force
 # Copy application files
 COPY --chown=jukebox:jukebox . .
 
-# Create logs directory with proper permissions for the non-root user
-RUN mkdir -p /app/logs && chown jukebox:jukebox /app/logs && chmod 755 /app/logs
+# Create logs and data directories with proper permissions for the non-root user
+RUN mkdir -p /app/logs /app/data && \
+    chown jukebox:jukebox /app/logs /app/data && \
+    chmod 755 /app/logs /app/data
 
 # Switch to non-root user
 USER jukebox
