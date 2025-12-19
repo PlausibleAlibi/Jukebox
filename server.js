@@ -51,13 +51,37 @@ let enforceTrackLimits = process.env.ENFORCE_TRACK_LIMITS !== 'false';
 const generalLimiter = rateLimit({
   windowMs: RATE_LIMIT_WINDOW_MS,
   max: 100,
-  message: { error: 'Too many requests, please try again later.' }
+  message: { error: 'Too many requests, please try again later.' },
+  handler: (req, res) => {
+    const clientIP = getClientIP(req);
+    logger.warn('Rate limit hit', {
+      endpoint: req.path,
+      method: req.method,
+      clientIP,
+      limit: 100,
+      windowMs: RATE_LIMIT_WINDOW_MS,
+      windowMinutes: RATE_LIMIT_WINDOW_MS / MS_PER_MINUTE
+    });
+    res.status(429).json({ error: 'Too many requests, please try again later.' });
+  }
 });
 
 const authLimiter = rateLimit({
   windowMs: RATE_LIMIT_WINDOW_MS,
   max: 10,
-  message: { error: 'Too many authentication attempts, please try again later.' }
+  message: { error: 'Too many authentication attempts, please try again later.' },
+  handler: (req, res) => {
+    const clientIP = getClientIP(req);
+    logger.warn('Auth rate limit hit', {
+      endpoint: req.path,
+      method: req.method,
+      clientIP,
+      limit: 10,
+      windowMs: RATE_LIMIT_WINDOW_MS,
+      windowMinutes: RATE_LIMIT_WINDOW_MS / MS_PER_MINUTE
+    });
+    res.status(429).json({ error: 'Too many authentication attempts, please try again later.' });
+  }
 });
 
 // In-memory storage for tokens (in production, use a proper session store)
@@ -133,6 +157,12 @@ function getSpotifyRedirectUri() {
  * @returns {Promise<{success: boolean, error?: string}>}
  */
 async function exchangeCodeForTokens(code, redirectUri) {
+  logger.debug('Token exchange starting', {
+    hasCode: !!code,
+    redirectUri,
+    endpoint: 'https://accounts.spotify.com/api/token'
+  });
+  
   try {
     const response = await fetch('https://accounts.spotify.com/api/token', {
       method: 'POST',
@@ -149,19 +179,52 @@ async function exchangeCodeForTokens(code, redirectUri) {
 
     if (!response.ok) {
       const errorMessage = await parseSpotifyErrorResponse(response, 'Token exchange failed');
-      logger.error('OAuth token exchange failed', { error: errorMessage });
+      logger.error('OAuth token exchange failed', { 
+        error: errorMessage,
+        statusCode: response.status
+      });
+      
+      logger.debug('Token exchange error details', {
+        statusCode: response.status,
+        errorMessage,
+        redirectUri
+      });
+      
       return { success: false, error: 'token_exchange_failed' };
     }
 
     const data = await response.json();
+    
+    const oldTokenData = {
+      hasAccessToken: !!tokenData.accessToken,
+      hasRefreshToken: !!tokenData.refreshToken
+    };
+    
     tokenData.accessToken = data.access_token;
     tokenData.refreshToken = data.refresh_token;
     tokenData.expiresAt = Date.now() + (data.expires_in * 1000);
     
+    logger.verbose('Token storage updated', {
+      accessToken: 'set',
+      refreshToken: 'set',
+      expiresAt: new Date(tokenData.expiresAt).toISOString(),
+      expiresInSeconds: data.expires_in
+    });
+    
     logger.info('OAuth authentication successful');
+    
+    logger.debug('Token exchange successful', {
+      hasAccessToken: !!data.access_token,
+      hasRefreshToken: !!data.refresh_token,
+      expiresIn: data.expires_in
+    });
+    
     return { success: true };
   } catch (err) {
-    logger.error('OAuth callback error', { error: err.message });
+    logger.error('OAuth callback error', { 
+      error: err.message,
+      stack: err.stack
+    });
     return { success: false, error: 'callback_failed' };
   }
 }
@@ -175,28 +238,57 @@ async function startOAuthCallbackServer() {
     callbackApp.get('/callback', async (req, res) => {
       const { code, error, state } = req.query;
 
+      logger.verbose('OAuth dynamic callback received', {
+        hasCode: !!code,
+        hasError: !!error,
+        hasState: !!state,
+        port: oauthCallbackPort
+      });
+
       // Verify state to prevent CSRF attacks
       if (state !== currentOAuthState) {
+        logger.warn('OAuth state mismatch on dynamic callback', {
+          expected: currentOAuthState ? currentOAuthState.substring(0, 8) + '...' : null,
+          received: state ? state.substring(0, 8) + '...' : null,
+          reason: 'csrf_protection'
+        });
         res.status(400).send('Invalid OAuth state. Please try again.');
         return;
       }
 
       if (error) {
+        logger.warn('OAuth dynamic callback error', {
+          error,
+          source: 'spotify'
+        });
         res.redirect(`${mainAppUrl}/?error=${encodeURIComponent(error)}`);
         return;
       }
 
       if (!code) {
+        logger.warn('OAuth dynamic callback missing code');
         res.redirect(`${mainAppUrl}/?error=no_code`);
         return;
       }
 
       const redirectUri = getSpotifyRedirectUri();
+      
+      logger.debug('OAuth dynamic callback: Exchanging code', {
+        hasCode: true,
+        redirectUri
+      });
+      
       const result = await exchangeCodeForTokens(code, redirectUri);
       
       if (result.success) {
+        logger.info('OAuth dynamic callback: Success', {
+          redirecting: 'main_app'
+        });
         res.redirect(`${mainAppUrl}/?authenticated=true`);
       } else {
+        logger.warn('OAuth dynamic callback: Token exchange failed', {
+          error: result.error
+        });
         res.redirect(`${mainAppUrl}/?error=${result.error}`);
       }
     });
@@ -204,7 +296,19 @@ async function startOAuthCallbackServer() {
     // Bind to 127.0.0.1 (loopback) on port 0 to get a random available port
     oauthCallbackServer = callbackApp.listen(0, '127.0.0.1', () => {
       oauthCallbackPort = oauthCallbackServer.address().port;
-      logger.info('OAuth callback server started', { port: oauthCallbackPort, url: `http://127.0.0.1:${oauthCallbackPort}/callback` });
+      const callbackUrl = `http://127.0.0.1:${oauthCallbackPort}/callback`;
+      
+      logger.info('OAuth callback server started', { 
+        port: oauthCallbackPort, 
+        url: callbackUrl
+      });
+      
+      logger.debug('OAuth dynamic port selected', {
+        port: oauthCallbackPort,
+        address: '127.0.0.1',
+        protocol: 'http'
+      });
+      
       resolve(oauthCallbackPort);
     });
 
@@ -236,7 +340,14 @@ function getClientIP(req) {
 
 // Generate admin session token
 function generateAdminToken() {
-  return crypto.randomBytes(32).toString('hex');
+  const token = crypto.randomBytes(32).toString('hex');
+  
+  logger.verbose('Admin session token generated', {
+    tokenLength: token.length,
+    encoding: 'hex'
+  });
+  
+  return token;
 }
 
 // Middleware
@@ -253,12 +364,22 @@ async function spotifyFetch(endpoint, options = {}) {
   const url = endpoint.startsWith('http') ? endpoint : `https://api.spotify.com/v1${endpoint}`;
   const maxRetries = 3;
   const timeoutMs = 10000; // 10 seconds
+  const startTime = Date.now();
+  
+  logger.debug('Spotify API request', {
+    endpoint: url,
+    method: options.method || 'GET',
+    hasBody: !!options.body,
+    body: options.body,
+    headers: options.headers ? Object.keys(options.headers) : []
+  });
   
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
     
     try {
+      const attemptStartTime = Date.now();
       const response = await fetch(url, {
         ...options,
         headers: {
@@ -270,6 +391,18 @@ async function spotifyFetch(endpoint, options = {}) {
       });
       
       clearTimeout(timeoutId);
+      const responseTime = Date.now() - attemptStartTime;
+      const totalTime = Date.now() - startTime;
+      
+      logger.debug('Spotify API response', {
+        endpoint: url,
+        method: options.method || 'GET',
+        statusCode: response.status,
+        responseTimeMs: responseTime,
+        totalTimeMs: totalTime,
+        attempt: attempt + 1,
+        isSuccess: response.ok
+      });
       
       // Check if we should retry based on status code
       if (response.ok || attempt === maxRetries) {
@@ -277,9 +410,20 @@ async function spotifyFetch(endpoint, options = {}) {
         if (attempt > 0) {
           logger.info(`Spotify API call succeeded after ${attempt} retries`, { 
             endpoint: url, 
-            statusCode: response.status 
+            statusCode: response.status,
+            totalAttempts: attempt + 1,
+            totalTimeMs: totalTime
           });
         }
+        
+        logger.info('Spotify API timing', {
+          endpoint: url,
+          method: options.method || 'GET',
+          statusCode: response.status,
+          responseTimeMs: responseTime,
+          retriesUsed: attempt
+        });
+        
         return response;
       }
       
@@ -292,6 +436,14 @@ async function spotifyFetch(endpoint, options = {}) {
       
       if (!shouldRetry) {
         // Don't retry on 4xx client errors (except 429)
+        // Log error response body at debug level
+        const responseText = await response.text();
+        logger.debug('Spotify API error response body', {
+          endpoint: url,
+          statusCode: response.status,
+          responseBody: responseText
+        });
+        
         logger.warn(`Spotify API call failed with non-retryable status`, { 
           endpoint: url, 
           statusCode: response.status,
@@ -305,7 +457,8 @@ async function spotifyFetch(endpoint, options = {}) {
         endpoint: url, 
         statusCode: response.status,
         attempt: attempt + 1,
-        maxRetries: maxRetries
+        maxRetries: maxRetries,
+        retryNumber: attempt + 1
       });
       
       // Wait before retrying with exponential backoff
@@ -314,6 +467,14 @@ async function spotifyFetch(endpoint, options = {}) {
       
     } catch (err) {
       clearTimeout(timeoutId);
+      
+      logger.debug('Spotify API request error', {
+        endpoint: url,
+        error: err.message,
+        errorName: err.name,
+        stack: err.stack,
+        attempt: attempt + 1
+      });
       
       // Check if this is a timeout/network error that should be retried
       const isRetryable = (
@@ -329,7 +490,8 @@ async function spotifyFetch(endpoint, options = {}) {
           endpoint: url,
           error: err.message,
           errorName: err.name,
-          attempt: attempt + 1
+          attempt: attempt + 1,
+          totalTimeMs: Date.now() - startTime
         });
         throw err;
       }
@@ -340,7 +502,8 @@ async function spotifyFetch(endpoint, options = {}) {
         error: err.message,
         errorName: err.name,
         attempt: attempt + 1,
-        maxRetries: maxRetries
+        maxRetries: maxRetries,
+        retryNumber: attempt + 1
       });
       
       // Wait before retrying with exponential backoff
@@ -393,9 +556,18 @@ async function refreshAccessToken() {
   }
 
   try {
+    const timeUntilExpiry = tokenData.expiresAt ? Math.floor((tokenData.expiresAt - Date.now()) / 1000) : 0;
+    
+    logger.debug('Token refresh attempt', {
+      currentToken: tokenData.accessToken ? 'present' : 'missing',
+      expiresAt: tokenData.expiresAt ? new Date(tokenData.expiresAt).toISOString() : null,
+      timeUntilExpirySeconds: timeUntilExpiry,
+      refreshToken: tokenData.refreshToken ? 'present' : 'missing'
+    });
+    
     logger.info('Token refresh: Starting', {
       expiresAt: new Date(tokenData.expiresAt).toISOString(),
-      timeUntilExpiry: Math.floor((tokenData.expiresAt - Date.now()) / 1000) + 's'
+      timeUntilExpiry: timeUntilExpiry + 's'
     });
 
     const response = await fetch('https://accounts.spotify.com/api/token', {
@@ -414,17 +586,36 @@ async function refreshAccessToken() {
       const errorText = await response.text();
       logger.error('Token refresh failed', {
         statusCode: response.status,
-        error: errorText
+        error: errorText,
+        hadRefreshToken: !!tokenData.refreshToken,
+        endpoint: 'https://accounts.spotify.com/api/token'
+      });
+      logger.debug('Token refresh failure details', {
+        responseBody: errorText,
+        statusCode: response.status,
+        headers: Object.fromEntries(response.headers.entries())
       });
       return false;
     }
 
     const data = await response.json();
+    
+    const oldAccessToken = tokenData.accessToken ? 'present' : 'missing';
+    const oldRefreshToken = tokenData.refreshToken ? 'present' : 'missing';
+    const oldExpiresAt = tokenData.expiresAt;
+    
     tokenData.accessToken = data.access_token;
     tokenData.expiresAt = Date.now() + (data.expires_in * 1000);
     if (data.refresh_token) {
       tokenData.refreshToken = data.refresh_token;
     }
+    
+    logger.verbose('Token storage updated', {
+      accessToken: 'updated',
+      refreshToken: data.refresh_token ? 'updated' : 'unchanged',
+      oldExpiresAt: oldExpiresAt ? new Date(oldExpiresAt).toISOString() : null,
+      newExpiresAt: new Date(tokenData.expiresAt).toISOString()
+    });
     
     logger.info('Token refresh: Success', {
       expiresIn: data.expires_in + 's',
@@ -440,14 +631,44 @@ async function refreshAccessToken() {
 // Middleware to ensure token is valid
 async function ensureToken(req, res, next) {
   if (!tokenData.accessToken) {
+    logger.verbose('Token validation failed: No access token', {
+      endpoint: req.path,
+      method: req.method
+    });
     return res.status(401).json({ error: 'Host not authenticated. Please authenticate first.' });
   }
 
+  const timeUntilExpiry = tokenData.expiresAt - Date.now();
+  const needsRefresh = Date.now() >= tokenData.expiresAt - TOKEN_REFRESH_BUFFER_MS;
+  
+  logger.verbose('Token validation', {
+    hasAccessToken: true,
+    expiresAt: new Date(tokenData.expiresAt).toISOString(),
+    timeUntilExpirySeconds: Math.floor(timeUntilExpiry / 1000),
+    needsRefresh,
+    endpoint: req.path,
+    method: req.method
+  });
+
   // Refresh token if expired or about to expire (within buffer time)
-  if (Date.now() >= tokenData.expiresAt - TOKEN_REFRESH_BUFFER_MS) {
+  if (needsRefresh) {
+    logger.debug('Token refresh needed', {
+      reason: timeUntilExpiry <= 0 ? 'expired' : 'within_buffer',
+      timeUntilExpirySeconds: Math.floor(timeUntilExpiry / 1000),
+      bufferSeconds: TOKEN_REFRESH_BUFFER_MS / 1000
+    });
+    
     const refreshed = await refreshAccessToken();
     if (!refreshed) {
+      const oldTokenData = { ...tokenData };
       tokenData = { accessToken: null, refreshToken: null, expiresAt: null };
+      
+      logger.warn('Token cleared after failed refresh', {
+        hadAccessToken: !!oldTokenData.accessToken,
+        hadRefreshToken: !!oldTokenData.refreshToken,
+        endpoint: req.path
+      });
+      
       return res.status(401).json({ error: 'Session expired. Please re-authenticate.' });
     }
   }
@@ -516,19 +737,44 @@ app.get('/login', authLimiter, async (req, res) => {
     if (USE_DYNAMIC_OAUTH_PORT) {
       // Start OAuth callback server on dynamic port (RFC 8252 compliant)
       if (!oauthCallbackServer) {
+        logger.debug('Starting OAuth callback server', {
+          mode: 'dynamic_port',
+          loopbackAddress: '127.0.0.1'
+        });
+        
         await startOAuthCallbackServer();
+        
+        logger.info('OAuth callback server started', {
+          port: oauthCallbackPort,
+          mode: 'dynamic'
+        });
       }
       redirectUri = getSpotifyRedirectUri();
       
       if (!redirectUri) {
+        logger.error('OAuth redirect URI unavailable', {
+          oauthCallbackPort,
+          oauthCallbackServer: !!oauthCallbackServer
+        });
         return res.status(500).send('Failed to start OAuth callback server. Unable to allocate a free port on the loopback interface.');
       }
     } else {
       redirectUri = process.env.SPOTIFY_REDIRECT_URI;
+      
+      logger.debug('Using static OAuth redirect URI', {
+        mode: 'static',
+        redirectUri
+      });
     }
 
     const state = crypto.randomBytes(16).toString('hex');
     currentOAuthState = state;
+    
+    logger.debug('OAuth state generated', {
+      stateLength: state.length,
+      statePreview: state.substring(0, 8) + '...'
+    });
+    
     const scope = 'user-read-playback-state user-modify-playback-state';
 
     const authUrl = new URL('https://accounts.spotify.com/authorize');
@@ -538,10 +784,26 @@ app.get('/login', authLimiter, async (req, res) => {
     authUrl.searchParams.append('redirect_uri', redirectUri);
     authUrl.searchParams.append('state', state);
 
-    logger.info('OAuth flow started', { redirectUri, useDynamicPort: USE_DYNAMIC_OAUTH_PORT });
+    logger.debug('OAuth authorization URL constructed', {
+      redirectUri,
+      scope,
+      clientId: SPOTIFY_CLIENT_ID.substring(0, 8) + '...',
+      hasState: !!state
+    });
+
+    logger.info('OAuth flow started', { 
+      redirectUri, 
+      useDynamicPort: USE_DYNAMIC_OAUTH_PORT,
+      clientIP: getClientIP(req)
+    });
+    
     res.redirect(authUrl.toString());
   } catch (err) {
-    logger.error('OAuth login error', { error: err.message });
+    logger.error('OAuth login error', { 
+      error: err.message,
+      stack: err.stack,
+      useDynamicPort: USE_DYNAMIC_OAUTH_PORT
+    });
     res.status(500).send(`Failed to start OAuth flow: ${err.message}`);
   }
 });
@@ -550,29 +812,64 @@ app.get('/login', authLimiter, async (req, res) => {
 app.get('/callback', async (req, res) => {
   // If using dynamic OAuth port, this endpoint should not receive callbacks
   if (USE_DYNAMIC_OAUTH_PORT) {
+    logger.warn('OAuth callback received on wrong endpoint', {
+      mode: 'dynamic_port',
+      shouldUseDynamicPort: true
+    });
     return res.status(400).send('OAuth callback should be received on the dynamic loopback port. Please restart the OAuth flow by clicking "Connect Spotify" again.');
   }
 
   const { code, error, state } = req.query;
 
+  logger.verbose('OAuth callback processing', {
+    hasCode: !!code,
+    hasError: !!error,
+    hasState: !!state,
+    expectedState: currentOAuthState ? currentOAuthState.substring(0, 8) + '...' : null,
+    receivedState: state ? state.substring(0, 8) + '...' : null
+  });
+
   // Verify state to prevent CSRF attacks
   if (state !== currentOAuthState) {
+    logger.warn('OAuth state mismatch', {
+      expected: currentOAuthState,
+      received: state,
+      reason: 'csrf_protection'
+    });
     return res.redirect('/?error=invalid_state');
   }
 
   if (error) {
+    logger.warn('OAuth callback error', {
+      error,
+      source: 'spotify'
+    });
     return res.redirect('/?error=' + encodeURIComponent(error));
   }
 
   if (!code) {
+    logger.warn('OAuth callback missing code', {
+      query: req.query
+    });
     return res.redirect('/?error=no_code');
   }
+
+  logger.debug('OAuth callback: Exchanging code for tokens', {
+    hasCode: true,
+    redirectUri: process.env.SPOTIFY_REDIRECT_URI
+  });
 
   const result = await exchangeCodeForTokens(code, process.env.SPOTIFY_REDIRECT_URI);
   
   if (result.success) {
+    logger.info('OAuth callback: Success', {
+      redirecting: 'home'
+    });
     res.redirect('/?authenticated=true');
   } else {
+    logger.warn('OAuth callback: Token exchange failed', {
+      error: result.error
+    });
     res.redirect('/?error=' + result.error);
   }
 });
@@ -606,6 +903,15 @@ app.get('/api/search', ensureToken, async (req, res) => {
         query: q,
         clientIP
       });
+      
+      logger.debug('Spotify search error context', {
+        endpoint: '/search',
+        query: q,
+        statusCode: response.status,
+        clientIP,
+        method: 'GET'
+      });
+      
       return res.status(response.status).json({ error: errorMessage });
     }
 
@@ -620,9 +926,20 @@ app.get('/api/search', ensureToken, async (req, res) => {
       duration: track.duration_ms
     }));
 
+    logger.debug('Spotify search results', {
+      query: q,
+      resultCount: tracks.length,
+      trackIds: tracks.map(t => t.id).slice(0, 5)
+    });
+
     res.json({ tracks });
   } catch (err) {
-    logger.error('Spotify search error', { error: err.message, query: q, clientIP });
+    logger.error('Spotify search error', { 
+      error: err.message, 
+      query: q, 
+      clientIP,
+      stack: err.stack
+    });
     res.status(500).json({ error: 'Failed to search tracks' });
   }
 });
@@ -639,11 +956,26 @@ app.post('/api/queue', ensureToken, async (req, res) => {
   // Check track limit per IP (only if enforcement is enabled)
   const currentCount = ipTrackCount[clientIP] || 0;
   if (enforceTrackLimits && currentCount >= MAX_TRACKS_PER_IP) {
+    logger.warn('Track limit hit', {
+      clientIP,
+      currentCount,
+      maxTracks: MAX_TRACKS_PER_IP,
+      enforceTrackLimits
+    });
     return res.status(429).json({ 
       error: `Track limit reached. You can only add ${MAX_TRACKS_PER_IP} tracks.`,
       remaining: 0
     });
   }
+  
+  // Log track limit check at verbose level
+  logger.verbose('Track limit check', {
+    clientIP,
+    currentCount,
+    maxTracks: MAX_TRACKS_PER_IP,
+    remaining: MAX_TRACKS_PER_IP - currentCount,
+    enforceTrackLimits
+  });
 
   try {
     const response = await spotifyFetch(`/me/player/queue?uri=${encodeURIComponent(uri)}`, {
@@ -666,7 +998,21 @@ app.post('/api/queue', ensureToken, async (req, res) => {
       
       // Store nickname if provided
       if (nickname) {
+        const previousNickname = userNicknames[clientIP];
         userNicknames[clientIP] = nickname;
+        
+        if (previousNickname && previousNickname !== nickname) {
+          logger.verbose('Nickname updated', {
+            clientIP,
+            oldNickname: previousNickname,
+            newNickname: nickname
+          });
+        } else if (!previousNickname) {
+          logger.verbose('Nickname set', {
+            clientIP,
+            nickname
+          });
+        }
       }
       
       // Add to party queue for voting display
@@ -674,7 +1020,7 @@ app.post('/api/queue', ensureToken, async (req, res) => {
       const uriParts = uri.split(':');
       const trackId = uriParts.length >= 3 ? uriParts[2] : uri;
       if (trackId && !partyQueue.find(t => t.id === trackId)) {
-        partyQueue.push({
+        const track = {
           id: trackId,
           uri,
           name: name || 'Unknown',
@@ -684,24 +1030,30 @@ app.post('/api/queue', ensureToken, async (req, res) => {
           addedByName: userNicknames[clientIP] || nickname || 'Guest',
           addedAt: Date.now(),
           votes: 0
-        });
+        };
+        partyQueue.push(track);
         trackVotes[trackId] = new Set();
         
         logger.info('Party queue: Track added', {
           trackId,
           trackName: name,
-          artist,
-          clientIP,
-          addedByName: userNicknames[clientIP] || nickname || 'Guest',
-          queueSize: partyQueue.length
+          artistName: artist,
+          addedByIP: clientIP,
+          nickname: userNicknames[clientIP] || nickname || 'Guest',
+          queueSize: partyQueue.length,
+          votesCount: 0,
+          uri
         });
       }
       
-      logger.info('Track limit enforced', {
+      logger.verbose('Track count updated', {
         clientIP,
+        oldCount: currentCount,
+        newCount: currentCount + 1,
         used: currentCount + 1,
         remaining: MAX_TRACKS_PER_IP - (currentCount + 1),
-        max: MAX_TRACKS_PER_IP
+        max: MAX_TRACKS_PER_IP,
+        enforceTrackLimits
       });
       
       return res.json({ 
@@ -724,9 +1076,24 @@ app.post('/api/queue', ensureToken, async (req, res) => {
       uri,
       clientIP
     });
+    
+    logger.debug('Spotify queue add error context', {
+      uri,
+      trackName: name,
+      artistName: artist,
+      clientIP,
+      statusCode: response.status,
+      method: 'POST'
+    });
+    
     return res.status(response.status).json({ error: errorMessage });
   } catch (err) {
-    logger.error('Spotify queue error', { error: err.message, uri, clientIP });
+    logger.error('Spotify queue error', { 
+      error: err.message, 
+      uri, 
+      clientIP,
+      stack: err.stack
+    });
     res.status(500).json({ error: 'Failed to add track to queue' });
   }
 });
@@ -771,24 +1138,32 @@ app.post('/api/vote/:trackId', (req, res) => {
   if (trackVotes[trackId].has(clientIP)) {
     // Remove vote
     trackVotes[trackId].delete(clientIP);
+    const previousVotes = track.votes;
     track.votes--;
     logger.info('Party queue: Vote removed', {
       trackId,
       trackName: track.name,
-      clientIP,
-      newVoteCount: track.votes
+      voterIP: clientIP,
+      action: 'remove',
+      previousVoteCount: previousVotes,
+      newVoteCount: track.votes,
+      artistName: track.artist
     });
     return res.json({ success: true, votes: track.votes, hasVoted: false });
   }
   
   // Add vote
   trackVotes[trackId].add(clientIP);
+  const previousVotes = track.votes;
   track.votes++;
   logger.info('Party queue: Vote added', {
     trackId,
     trackName: track.name,
-    clientIP,
-    newVoteCount: track.votes
+    voterIP: clientIP,
+    action: 'add',
+    previousVoteCount: previousVotes,
+    newVoteCount: track.votes,
+    artistName: track.artist
   });
   res.json({ success: true, votes: track.votes, hasVoted: true });
 });
@@ -810,12 +1185,25 @@ app.get('/api/playback', ensureToken, async (req, res) => {
   try {
     // Check cache first
     const now = Date.now();
-    if (playbackCache.data && (now - playbackCache.timestamp) < playbackCache.ttl) {
-      logger.debug('Playback state: Serving from cache', {
-        cacheAge: Math.floor((now - playbackCache.timestamp) / 1000) + 's'
+    const cacheAge = now - playbackCache.timestamp;
+    const isCacheValid = playbackCache.data && cacheAge < playbackCache.ttl;
+    
+    if (isCacheValid) {
+      logger.verbose('Playback cache hit', {
+        cacheAgeMs: cacheAge,
+        cacheAgeSeconds: Math.floor(cacheAge / 1000),
+        ttlMs: playbackCache.ttl,
+        ttlSeconds: playbackCache.ttl / 1000
       });
       return res.json(playbackCache.data);
     }
+    
+    logger.verbose('Playback cache miss', {
+      reason: !playbackCache.data ? 'no_data' : 'expired',
+      cacheAgeMs: cacheAge,
+      ttlMs: playbackCache.ttl,
+      lastUpdateTimestamp: playbackCache.timestamp
+    });
 
     const response = await spotifyFetch('/me/player');
 
@@ -829,6 +1217,12 @@ app.get('/api/playback', ensureToken, async (req, res) => {
       const result = { playing: false, device: null };
       playbackCache.data = result;
       playbackCache.timestamp = now;
+      
+      logger.verbose('Playback cache updated', {
+        status: 'no_playback',
+        cacheTimestamp: now
+      });
+      
       return res.json(result);
     }
 
@@ -855,9 +1249,20 @@ app.get('/api/playback', ensureToken, async (req, res) => {
     playbackCache.data = result;
     playbackCache.timestamp = now;
     
+    logger.verbose('Playback cache updated', {
+      playing: result.playing,
+      device: result.device,
+      hasTrack: !!result.track,
+      cacheTimestamp: now
+    });
+    
     res.json(result);
   } catch (err) {
-    logger.error('Spotify playback state error', { error: err.message });
+    logger.error('Spotify playback state error', { 
+      error: err.message,
+      stack: err.stack,
+      endpoint: '/me/player'
+    });
     res.status(500).json({ error: 'Failed to get playback state' });
   }
 });
@@ -871,12 +1276,25 @@ app.get('/api/spotify-queue', ensureToken, async (req, res) => {
   try {
     // Check cache first
     const now = Date.now();
-    if (spotifyQueueCache.data && (now - spotifyQueueCache.timestamp) < spotifyQueueCache.ttl) {
-      logger.debug('Spotify queue: Serving from cache', {
-        cacheAge: Math.floor((now - spotifyQueueCache.timestamp) / 1000) + 's'
+    const cacheAge = now - spotifyQueueCache.timestamp;
+    const isCacheValid = spotifyQueueCache.data && cacheAge < spotifyQueueCache.ttl;
+    
+    if (isCacheValid) {
+      logger.verbose('Spotify queue cache hit', {
+        cacheAgeMs: cacheAge,
+        cacheAgeSeconds: Math.floor(cacheAge / 1000),
+        ttlMs: spotifyQueueCache.ttl,
+        ttlSeconds: spotifyQueueCache.ttl / 1000
       });
       return res.json(spotifyQueueCache.data);
     }
+    
+    logger.verbose('Spotify queue cache miss', {
+      reason: !spotifyQueueCache.data ? 'no_data' : 'expired',
+      cacheAgeMs: cacheAge,
+      ttlMs: spotifyQueueCache.ttl,
+      lastUpdateTimestamp: spotifyQueueCache.timestamp
+    });
 
     const response = await spotifyFetch('/me/player/queue');
 
@@ -890,6 +1308,12 @@ app.get('/api/spotify-queue', ensureToken, async (req, res) => {
       const result = { queue: [], currentlyPlaying: null };
       spotifyQueueCache.data = result;
       spotifyQueueCache.timestamp = now;
+      
+      logger.verbose('Spotify queue cache updated', {
+        status: 'no_device',
+        cacheTimestamp: now
+      });
+      
       return res.status(404).json({ error: 'No active device found. Please start playing on Spotify first.' });
     }
 
@@ -929,33 +1353,84 @@ app.get('/api/spotify-queue', ensureToken, async (req, res) => {
     spotifyQueueCache.data = result;
     spotifyQueueCache.timestamp = now;
     
+    logger.verbose('Spotify queue cache updated', {
+      queueLength: result.queue.length,
+      hasCurrentlyPlaying: !!result.currentlyPlaying,
+      cacheTimestamp: now
+    });
+    
     res.json(result);
   } catch (err) {
-    logger.error('Spotify queue error', { error: err.message });
+    logger.error('Spotify queue error', { 
+      error: err.message,
+      stack: err.stack,
+      endpoint: '/me/player/queue'
+    });
     res.status(500).json({ error: 'Failed to get Spotify queue' });
   }
 });
 
 // Logout (clear tokens)
 app.post('/api/logout', (req, res) => {
+  const hadTokens = {
+    accessToken: !!tokenData.accessToken,
+    refreshToken: !!tokenData.refreshToken,
+    expiresAt: tokenData.expiresAt
+  };
+  
   tokenData = { accessToken: null, refreshToken: null, expiresAt: null };
-  logger.info('User logged out, tokens cleared');
+  
+  logger.info('User logged out', {
+    clientIP: getClientIP(req),
+    hadAccessToken: hadTokens.accessToken,
+    hadRefreshToken: hadTokens.refreshToken
+  });
+  
+  logger.verbose('Token storage cleared', {
+    previousState: hadTokens,
+    newState: { accessToken: null, refreshToken: null, expiresAt: null }
+  });
+  
   res.json({ success: true });
 });
 
 // Admin authentication middleware
 function requireAdmin(req, res, next) {
   const authHeader = req.headers.authorization;
+  const clientIP = getClientIP(req);
+  
   if (!ADMIN_PASSWORD) {
+    logger.warn('Admin access attempted but not configured', {
+      endpoint: req.path,
+      clientIP
+    });
     return res.status(503).json({ error: 'Admin panel not configured. Set ADMIN_PASSWORD environment variable.' });
   }
   
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    logger.verbose('Admin access denied: Missing authorization header', {
+      endpoint: req.path,
+      clientIP,
+      hasHeader: !!authHeader
+    });
     return res.status(401).json({ error: 'Admin authentication required' });
   }
   
   const token = authHeader.substring(7);
-  if (!adminSessions.has(token)) {
+  const isValidSession = adminSessions.has(token);
+  
+  logger.verbose('Admin session validation', {
+    endpoint: req.path,
+    clientIP,
+    isValidSession,
+    activeSessions: adminSessions.size
+  });
+  
+  if (!isValidSession) {
+    logger.warn('Admin access denied: Invalid or expired session', {
+      endpoint: req.path,
+      clientIP
+    });
     return res.status(403).json({ error: 'Invalid or expired admin session' });
   }
   
@@ -970,35 +1445,73 @@ app.get('/api/admin/status', (req, res) => {
 // Admin: Verify credentials
 app.post('/api/admin/login', authLimiter, (req, res) => {
   const { password } = req.body;
+  const clientIP = getClientIP(req);
+  
+  logger.verbose('Admin login attempt', {
+    clientIP,
+    hasPassword: !!password,
+    adminConfigured: !!ADMIN_PASSWORD
+  });
   
   if (!ADMIN_PASSWORD) {
+    logger.warn('Admin login attempted but not configured', { clientIP });
     return res.status(503).json({ error: 'Admin panel not configured' });
   }
   
   if (password === ADMIN_PASSWORD) {
     const token = generateAdminToken();
     adminSessions.add(token);
-    logger.info('Admin login successful', { ip: getClientIP(req) });
+    
+    logger.info('Admin login successful', { 
+      clientIP,
+      sessionToken: token.substring(0, 8) + '...',
+      activeSessions: adminSessions.size
+    });
+    
     return res.json({ success: true, token });
   }
   
-  logger.warn('Admin login failed: invalid password', { ip: getClientIP(req) });
+  logger.warn('Admin login failed: invalid password', { 
+    clientIP,
+    attemptTimestamp: new Date().toISOString()
+  });
+  
   res.status(403).json({ error: 'Invalid password' });
 });
 
 // Admin: Skip current track
 app.post('/api/admin/skip', requireAdmin, ensureToken, async (req, res) => {
   const clientIP = getClientIP(req);
+  
   try {
+    // Get current playback state for logging
+    let currentTrack = null;
+    try {
+      const playbackResponse = await spotifyFetch('/me/player');
+      if (playbackResponse.ok) {
+        const playbackData = await playbackResponse.json();
+        if (playbackData.item) {
+          currentTrack = {
+            name: playbackData.item.name,
+            artist: playbackData.item.artists?.map(a => a.name).join(', ') || 'Unknown',
+            id: playbackData.item.id
+          };
+        }
+      }
+    } catch (err) {
+      logger.debug('Could not fetch current track for skip log', { error: err.message });
+    }
+    
     const response = await spotifyFetch('/me/player/next', {
       method: 'POST'
     });
 
     if (response.status === 204 || response.ok) {
-      logger.info('Admin action: Skip track', { 
+      logger.info('Admin: Track skipped', { 
         action: 'skip',
         clientIP,
-        statusCode: response.status
+        statusCode: response.status,
+        skippedTrack: currentTrack
       });
       return res.json({ success: true, message: 'Track skipped' });
     }
@@ -1017,7 +1530,11 @@ app.post('/api/admin/skip', requireAdmin, ensureToken, async (req, res) => {
     });
     return res.status(response.status).json({ error: errorMessage });
   } catch (err) {
-    logger.error('Admin skip track error', { error: err.message, clientIP });
+    logger.error('Admin skip track error', { 
+      error: err.message, 
+      clientIP,
+      stack: err.stack
+    });
     res.status(500).json({ error: 'Failed to skip track' });
   }
 });
@@ -1033,15 +1550,20 @@ app.delete('/api/admin/queue/:trackId', requireAdmin, (req, res) => {
   }
   
   const removedTrack = partyQueue[index];
+  const previousQueueSize = partyQueue.length;
   partyQueue.splice(index, 1);
   delete trackVotes[trackId];
   
-  logger.info('Admin action: Remove track from queue', {
-    action: 'remove_track',
+  logger.info('Party queue: Track removed', {
     trackId,
     trackName: removedTrack.name,
-    clientIP,
-    queueSize: partyQueue.length
+    artistName: removedTrack.artist,
+    removedBy: 'admin',
+    removedByIP: clientIP,
+    reason: 'admin_action',
+    previousQueueSize,
+    newQueueSize: partyQueue.length,
+    hadVotes: removedTrack.votes || 0
   });
   res.json({ success: true, message: 'Track removed from party queue' });
 });
@@ -1050,13 +1572,16 @@ app.delete('/api/admin/queue/:trackId', requireAdmin, (req, res) => {
 app.delete('/api/admin/queue', requireAdmin, (req, res) => {
   const clientIP = getClientIP(req);
   const previousQueueSize = partyQueue.length;
+  const clearedTracks = partyQueue.length;
   
   partyQueue = [];
   trackVotes = {};
   
-  logger.info('Admin action: Clear party queue', {
-    action: 'clear_queue',
-    clientIP,
+  logger.info('Party queue: Cleared', {
+    clearedBy: 'admin',
+    clearedByIP: clientIP,
+    reason: 'admin_action',
+    tracksCleared: clearedTracks,
     previousQueueSize,
     newQueueSize: 0
   });
@@ -1071,21 +1596,42 @@ app.post('/api/admin/reset-limits', requireAdmin, (req, res) => {
   if (ip) {
     const previousCount = ipTrackCount[ip] || 0;
     delete ipTrackCount[ip];
-    logger.info('Admin action: Reset track limit for IP', {
-      action: 'reset_limits',
+    
+    logger.info('Track limit reset', {
       targetIP: ip,
       previousCount,
-      clientIP
+      newCount: 0,
+      resetBy: 'admin',
+      resetByIP: clientIP,
+      reason: 'admin_action'
     });
+    
+    logger.verbose('IP track count changed', {
+      ip,
+      oldCount: previousCount,
+      newCount: 0,
+      action: 'reset',
+      triggeredBy: 'admin'
+    });
+    
     res.json({ success: true, message: `Track limit reset for ${ip}` });
   } else {
     const totalIPs = Object.keys(ipTrackCount).length;
+    const allCounts = { ...ipTrackCount };
     ipTrackCount = {};
-    logger.info('Admin action: Reset all track limits', {
-      action: 'reset_all_limits',
-      previousIPCount: totalIPs,
-      clientIP
+    
+    logger.info('All track limits reset', {
+      ipsCleared: totalIPs,
+      resetBy: 'admin',
+      resetByIP: clientIP,
+      reason: 'admin_action'
     });
+    
+    logger.debug('Track limits cleared', {
+      previousCounts: allCounts,
+      clearedIPCount: totalIPs
+    });
+    
     res.json({ success: true, message: 'All track limits reset' });
   }
 });
@@ -1098,16 +1644,35 @@ app.get('/api/admin/track-limits', requireAdmin, (req, res) => {
 // Admin: Pause playback
 app.post('/api/admin/pause', requireAdmin, ensureToken, async (req, res) => {
   const clientIP = getClientIP(req);
+  
   try {
+    // Get current playback state for logging
+    let currentTrack = null;
+    try {
+      const playbackResponse = await spotifyFetch('/me/player');
+      if (playbackResponse.ok) {
+        const playbackData = await playbackResponse.json();
+        if (playbackData.item) {
+          currentTrack = {
+            name: playbackData.item.name,
+            artist: playbackData.item.artists?.map(a => a.name).join(', ') || 'Unknown'
+          };
+        }
+      }
+    } catch (err) {
+      logger.debug('Could not fetch current track for pause log', { error: err.message });
+    }
+    
     const response = await spotifyFetch('/me/player/pause', {
       method: 'PUT'
     });
 
     if (response.status === 204 || response.ok) {
-      logger.info('Admin action: Pause playback', {
+      logger.info('Admin: Playback paused', {
         action: 'pause',
         clientIP,
-        statusCode: response.status
+        statusCode: response.status,
+        pausedTrack: currentTrack
       });
       return res.json({ success: true, message: 'Playback paused' });
     }
@@ -1126,7 +1691,11 @@ app.post('/api/admin/pause', requireAdmin, ensureToken, async (req, res) => {
     });
     return res.status(response.status).json({ error: errorMessage });
   } catch (err) {
-    logger.error('Admin pause playback error', { error: err.message, clientIP });
+    logger.error('Admin pause playback error', { 
+      error: err.message, 
+      clientIP,
+      stack: err.stack
+    });
     res.status(500).json({ error: 'Failed to pause playback' });
   }
 });
@@ -1134,16 +1703,35 @@ app.post('/api/admin/pause', requireAdmin, ensureToken, async (req, res) => {
 // Admin: Resume playback
 app.post('/api/admin/play', requireAdmin, ensureToken, async (req, res) => {
   const clientIP = getClientIP(req);
+  
   try {
+    // Get current playback state for logging
+    let currentTrack = null;
+    try {
+      const playbackResponse = await spotifyFetch('/me/player');
+      if (playbackResponse.ok) {
+        const playbackData = await playbackResponse.json();
+        if (playbackData.item) {
+          currentTrack = {
+            name: playbackData.item.name,
+            artist: playbackData.item.artists?.map(a => a.name).join(', ') || 'Unknown'
+          };
+        }
+      }
+    } catch (err) {
+      logger.debug('Could not fetch current track for play log', { error: err.message });
+    }
+    
     const response = await spotifyFetch('/me/player/play', {
       method: 'PUT'
     });
 
     if (response.status === 204 || response.ok) {
-      logger.info('Admin action: Resume playback', {
+      logger.info('Admin: Playback resumed', {
         action: 'play',
         clientIP,
-        statusCode: response.status
+        statusCode: response.status,
+        resumedTrack: currentTrack
       });
       return res.json({ success: true, message: 'Playback resumed' });
     }
@@ -1162,7 +1750,11 @@ app.post('/api/admin/play', requireAdmin, ensureToken, async (req, res) => {
     });
     return res.status(response.status).json({ error: errorMessage });
   } catch (err) {
-    logger.error('Admin resume playback error', { error: err.message, clientIP });
+    logger.error('Admin resume playback error', { 
+      error: err.message, 
+      clientIP,
+      stack: err.stack
+    });
     res.status(500).json({ error: 'Failed to resume playback' });
   }
 });
@@ -1174,6 +1766,7 @@ app.post('/api/admin/play', requireAdmin, ensureToken, async (req, res) => {
 app.post('/api/admin/toggle-limits', requireAdmin, (req, res) => {
   const clientIP = getClientIP(req);
   const { enabled } = req.body;
+  const previousState = enforceTrackLimits;
   
   // If enabled is provided, set to that value; otherwise toggle
   if (typeof enabled === 'boolean') {
@@ -1182,10 +1775,12 @@ app.post('/api/admin/toggle-limits', requireAdmin, (req, res) => {
     enforceTrackLimits = !enforceTrackLimits;
   }
   
-  logger.info('Admin action: Toggle track limits', {
-    action: 'toggle_limits',
-    enforceTrackLimits,
-    clientIP
+  logger.info('Track limit enforcement toggled', {
+    previousState,
+    newState: enforceTrackLimits,
+    toggledBy: 'admin',
+    toggledByIP: clientIP,
+    explicitValue: typeof enabled === 'boolean' ? enabled : 'toggled'
   });
   
   res.json({ 

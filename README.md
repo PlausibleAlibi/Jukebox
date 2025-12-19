@@ -113,49 +113,169 @@ Log files are automatically rotated daily, with:
 
 #### Log Levels
 
-Set the `LOG_LEVEL` environment variable to control verbosity:
+Party Jukebox supports Winston's hierarchical log levels. Set the `LOG_LEVEL` environment variable to control verbosity:
+
+| Level | Usage | Example Use Case |
+|-------|-------|------------------|
+| `error` | Failures that prevent operations | Token refresh fails, Spotify API errors |
+| `warn` | Potential issues | Rate limits hit, no active device, missing config |
+| `info` | Important events (default) | Server start, admin actions, queue operations, API calls |
+| `http` | HTTP requests | Automatically logged via Morgan |
+| `verbose` | Detailed operational info | Cache hits/misses, token validation, limit checks |
+| `debug` | Fine-grained debugging | Request/response bodies, state changes, stack traces |
+
+**Recommended Settings:**
 
 ```bash
-# In .env
-LOG_LEVEL=debug  # Most verbose
-LOG_LEVEL=info   # Default - server events, requests
-LOG_LEVEL=warn   # Warnings and errors only
-LOG_LEVEL=error  # Errors only
+# Production - Essential events only
+LOG_LEVEL=info     # Default, recommended for most deployments
+LOG_LEVEL=warn     # Quieter, only warnings and errors
+
+# Troubleshooting - Detailed operational visibility
+LOG_LEVEL=verbose  # See cache operations, token checks, IP tracking
+
+# Development/Debugging - Maximum detail
+LOG_LEVEL=debug    # Full request/response bodies, stack traces, state changes
 ```
 
-#### What's Logged
+#### What's Logged at Each Level
 
-- **Server events**: Startup, shutdown, configuration
-- **HTTP requests**: Method, URL, status code, response time, client IP (via Morgan)
-- **OAuth events**: Login flow, token refresh, authentication success/failure
-- **Spotify API**: Search queries, queue operations, playback errors
-- **Admin actions**: Login attempts, skip/pause/play, queue management
-- **Errors**: All errors with stack traces and context
+**Error Level:**
+- Token refresh failures with response details
+- Spotify API errors with status codes and error messages
+- Network failures and timeouts
+- Authentication failures
+- Stack traces (at debug level within error logs)
+
+**Warn Level:**
+- Rate limit hits (endpoint, IP, request count)
+- Admin login failures (invalid passwords)
+- No active Spotify device warnings
+- Missing configuration warnings
+- OAuth state mismatches
+
+**Info Level:**
+- Server startup and configuration
+- OAuth flow events (started, successful, failed)
+- Queue operations (track added, votes changed, tracks removed)
+- Admin actions (skip, pause, play, queue management)
+- Spotify API calls and response codes
+- Token refresh success
+- Track limit enforcement actions
+
+**Verbose Level:**
+- Token validation checks and results
+- Cache hits/misses (playback state, Spotify queue)
+- Cache updates with timestamps
+- IP track count changes
+- Nickname updates
+- Limit enforcement toggles
+- Admin session validation
+
+**Debug Level:**
+- Spotify API request details (method, endpoint, body, headers)
+- Spotify API response bodies (especially on errors)
+- OAuth state generation and validation
+- Token exchange details
+- Dynamic port selection for OAuth
+- Redirect URI construction
+- Request context (method, URL, headers) on errors
+- Stack traces for all errors
+- Cache operation details
 
 #### Log Format
 
 **Console output**: Human-readable with timestamps and colors
 ```
 2025-01-15 14:30:45 [info]: Party Jukebox server started (HTTP) {"url":"http://localhost:3000","port":3000}
+2025-01-15 14:31:12 [verbose]: Playback cache hit {"cacheAgeMs":5432,"cacheAgeSeconds":5,"ttlMs":15000,"ttlSeconds":15}
+2025-01-15 14:32:03 [debug]: Spotify API request {"endpoint":"https://api.spotify.com/v1/search","method":"GET","hasBody":false}
 ```
 
 **File output**: Structured JSON for parsing and analysis
 ```json
-{"level":"info","message":"Party Jukebox server started (HTTP)","url":"http://localhost:3000","port":3000,"timestamp":"2025-01-15T14:30:45.123Z","service":"party-jukebox"}
+{"level":"info","message":"Party queue: Track added","trackId":"3n3Ppam7vgaVa1iaRUc9Lp","trackName":"Mr. Brightside","artistName":"The Killers","addedByIP":"192.168.1.42","nickname":"Guest","queueSize":5,"votesCount":0,"timestamp":"2025-01-15T14:30:45.123Z","service":"party-jukebox"}
+```
+
+#### Examples of Enhanced Logging
+
+**Queue Operations:**
+```json
+// Track added to queue
+{"level":"info","message":"Party queue: Track added","trackId":"abc123","trackName":"Song Name","artistName":"Artist Name","addedByIP":"192.168.1.10","nickname":"John","queueSize":3,"votesCount":0}
+
+// Vote added
+{"level":"info","message":"Party queue: Vote added","trackId":"abc123","trackName":"Song Name","voterIP":"192.168.1.11","action":"add","previousVoteCount":2,"newVoteCount":3}
+```
+
+**Token Management:**
+```json
+// Token validation (verbose)
+{"level":"verbose","message":"Token validation","hasAccessToken":true,"expiresAt":"2025-01-15T15:30:00.000Z","timeUntilExpirySeconds":1800,"needsRefresh":false}
+
+// Token refresh attempt (debug)
+{"level":"debug","message":"Token refresh attempt","currentToken":"present","expiresAt":"2025-01-15T15:30:00.000Z","timeUntilExpirySeconds":60}
+```
+
+**Cache Operations:**
+```json
+// Cache hit (verbose)
+{"level":"verbose","message":"Playback cache hit","cacheAgeMs":3245,"cacheAgeSeconds":3,"ttlMs":15000,"ttlSeconds":15}
+
+// Cache miss (verbose)
+{"level":"verbose","message":"Spotify queue cache miss","reason":"expired","cacheAgeMs":16234,"ttlMs":15000}
+```
+
+**Spotify API:**
+```json
+// API request details (debug)
+{"level":"debug","message":"Spotify API request","endpoint":"https://api.spotify.com/v1/search","method":"GET","hasBody":false}
+
+// API timing (info)
+{"level":"info","message":"Spotify API timing","endpoint":"https://api.spotify.com/v1/search","method":"GET","statusCode":200,"responseTimeMs":245,"retriesUsed":0}
+```
+
+**Rate Limiting:**
+```json
+// Rate limit hit (warn)
+{"level":"warn","message":"Rate limit hit","endpoint":"/api/search","method":"GET","clientIP":"192.168.1.50","limit":100,"windowMinutes":15}
 ```
 
 #### Viewing Logs
 
 ```bash
-# View recent logs
+# View recent logs (all levels at your LOG_LEVEL and above)
 tail -f logs/jukebox-$(date +%Y-%m-%d).log
 
-# Search for errors
+# View only errors
+tail -f logs/jukebox-error-$(date +%Y-%m-%d).log
+
+# Search for specific events
 grep '"level":"error"' logs/jukebox-*.log
+grep 'Party queue: Track added' logs/jukebox-*.log
+grep 'Token refresh' logs/jukebox-*.log
 
 # Parse JSON logs with jq
 cat logs/jukebox-*.log | jq '. | select(.level == "error")'
+cat logs/jukebox-*.log | jq '. | select(.message | contains("queue"))'
+cat logs/jukebox-*.log | jq '. | select(.clientIP == "192.168.1.10")'
+
+# Count events by type
+cat logs/jukebox-*.log | jq -r '.message' | sort | uniq -c | sort -rn
+
+# Monitor cache performance
+cat logs/jukebox-*.log | jq '. | select(.message | contains("cache"))'
 ```
+
+#### Sensitive Data Protection
+
+Logging is designed to protect sensitive information:
+- **Tokens**: Never logged in full; only "present" or "missing" indicators at info/warn levels
+- **Passwords**: Never logged
+- **Partial token previews**: Only first 8 characters + "..." at debug level
+- **API keys**: Client ID shown as first 8 chars + "..." at debug level only
+
+At production levels (`info`, `warn`, `error`), no sensitive data is exposed.
 
 ### HTTPS/SSL Configuration
 
