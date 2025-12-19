@@ -1046,7 +1046,6 @@ app.post('/api/queue', ensureToken, async (req, res) => {
         clientIP,
         oldCount: currentCount,
         newCount: newCount,
-        used: newCount,
         remaining: MAX_TRACKS_PER_IP - newCount,
         max: MAX_TRACKS_PER_IP,
         enforceTrackLimits

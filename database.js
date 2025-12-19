@@ -54,6 +54,7 @@ function initializeDatabase() {
 function createTables() {
   const schema = `
     -- Party queue tracks
+    -- Note: UNIQUE constraint on (track_id, added_by_ip) prevents same user from adding same track twice
     CREATE TABLE IF NOT EXISTS party_queue (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       track_id TEXT NOT NULL,
@@ -718,6 +719,8 @@ function cleanupExpiredSessions() {
 
 /**
  * Add track to playback history
+ * Note: This is a non-critical operation for analytics purposes only.
+ * Failures are logged at warning level but don't affect core app functionality.
  * @param {Object} track - Track object
  * @param {number} playedAt - Timestamp when played
  */
@@ -743,7 +746,8 @@ function addToPlaybackHistory(track, playedAt = Date.now()) {
       playedAt
     });
   } catch (err) {
-    // Log at warning level since this affects analytics
+    // Log at warning level since this affects analytics, but is not critical for app operation
+    // Playback history is used for statistics only and its absence doesn't impact core features
     logger.warn('Failed to add to playback history', { 
       error: err.message,
       trackId: track.id || track.track_id
