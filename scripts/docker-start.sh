@@ -9,6 +9,7 @@
 # - .env file for configuration
 # - ./certs/ for SSL certificates
 # - ./logs/ for application logs
+# - ./data/ for SQLite database
 #
 # Prerequisites:
 # 1. Docker installed
@@ -54,18 +55,26 @@ if [ ! -d "logs" ]; then
     mkdir -p logs
 fi
 
-# Ensure logs directory is writable by the container's non-root user (UID 1001)
+# Create data directory if it doesn't exist
+if [ ! -d "data" ]; then
+    echo "Creating data/ directory..."
+    mkdir -p data
+fi
+
+# Ensure logs and data directories are writable by the container's non-root user (UID 1001)
 # This is needed because the container runs as the 'jukebox' user (UID 1001)
 # Try to set ownership to match container user first, fallback to group-writable
-echo "Ensuring logs/ directory has proper permissions..."
-if chown 1001:1001 logs 2>/dev/null; then
-    chmod 755 logs 2>/dev/null
-    echo "  Set ownership to UID 1001 (container user)"
-elif chmod 775 logs 2>/dev/null; then
-    echo "  Set group-writable permissions"
-else
-    echo "Note: Could not set permissions on logs/. You may need to run: sudo chown 1001:1001 logs"
-fi
+echo "Ensuring logs/ and data/ directories have proper permissions..."
+for dir in logs data; do
+    if chown 1001:1001 "$dir" 2>/dev/null; then
+        chmod 755 "$dir" 2>/dev/null
+        echo "  Set ownership of $dir/ to UID 1001 (container user)"
+    elif chmod 775 "$dir" 2>/dev/null; then
+        echo "  Set group-writable permissions on $dir/"
+    else
+        echo "Note: Could not set permissions on $dir/. You may need to run: sudo chown 1001:1001 $dir"
+    fi
+done
 
 # Check if container is already running
 if docker ps --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
@@ -92,6 +101,7 @@ echo "  - Port mapping: ${HOST_PORT}:${CONTAINER_PORT}"
 echo "  - Environment: .env"
 echo "  - Certificates: ./certs -> /app/certs"
 echo "  - Logs: ./logs -> /app/logs"
+echo "  - Database: ./data -> /app/data"
 
 docker run -d \
     --name "${CONTAINER_NAME}" \
@@ -100,6 +110,7 @@ docker run -d \
     --env-file .env \
     -v "$(pwd)/certs:/app/certs:ro" \
     -v "$(pwd)/logs:/app/logs" \
+    -v "$(pwd)/data:/app/data" \
     "${IMAGE_NAME}"
 
 # Wait for container to start

@@ -93,6 +93,64 @@ ipconfig
 | `SSL_PORT` | HTTPS server port | `443` |
 | `SSL_HOST` | IP address/hostname to bind for HTTPS | `0.0.0.0` |
 | `LOG_LEVEL` | Logging level (error, warn, info, http, verbose, debug, silly) | `info` |
+| `DATABASE_PATH` | Path to SQLite database file | `./data/jukebox.db` |
+| `ADMIN_SESSION_EXPIRY` | Admin session expiry in seconds | `86400` (24 hours) |
+
+### Database
+
+Party Jukebox uses SQLite for persistent storage of party data, ensuring your queue, votes, and user sessions survive server restarts.
+
+#### What's Stored
+
+The database maintains:
+- **Party Queue**: Tracks added by users with vote counts
+- **User Sessions**: Track counts and nicknames per IP address
+- **Admin Sessions**: Persistent admin authentication tokens
+- **Playback History**: Record of played tracks for analytics
+
+#### Database Location
+
+The database file is stored at `./data/jukebox.db` by default. You can customize the location:
+
+```bash
+DATABASE_PATH=./data/jukebox.db
+```
+
+The database uses SQLite's Write-Ahead Logging (WAL) mode for better concurrency. You'll see these files:
+- `jukebox.db` - Main database file
+- `jukebox.db-shm` - Shared memory file (temporary)
+- `jukebox.db-wal` - Write-ahead log (temporary)
+
+#### Database Backup
+
+To backup your party data:
+
+```bash
+# Backup
+cp ./data/jukebox.db ./data/jukebox.backup.db
+
+# Restore
+cp ./data/jukebox.backup.db ./data/jukebox.db
+```
+
+#### Reset Database
+
+To start fresh (⚠️ **WARNING**: deletes all data):
+
+```bash
+rm ./data/jukebox.db ./data/jukebox.db-shm ./data/jukebox.db-wal
+# Database will be recreated on next startup
+```
+
+#### Persistence Across Restarts
+
+With the database integration:
+- ✅ Party queue persists across server restarts
+- ✅ Vote counts are preserved
+- ✅ User track counts and limits survive restarts
+- ✅ Admin sessions remain valid after restart
+- ✅ User nicknames are remembered
+- ✅ Playback history is tracked over time
 
 ### Logging
 
@@ -436,9 +494,9 @@ cd certs
 mkcert 192.168.x.x localhost  # Replace with your LAN IP
 cd ..
 
-# 2. Create logs directory with proper permissions
-mkdir -p logs && sudo chown 1001:1001 logs
-# Or if sudo is unavailable: chmod 775 logs
+# 2. Create logs and data directories with proper permissions
+mkdir -p logs data && sudo chown 1001:1001 logs data
+# Or if sudo is unavailable: chmod 775 logs data
 
 # 3. Configure environment
 cp .env.example .env
@@ -458,8 +516,8 @@ The `scripts/` directory contains utility scripts for managing the application:
 
 | Script | Description |
 |--------|-------------|
-| `docker-start.sh` | Build and start the Docker container with all volume mounts (.env, certs, logs) |
-| `docker-stop.sh` | Stop and remove the Docker container (logs are preserved) |
+| `docker-start.sh` | Build and start the Docker container with all volume mounts (.env, certs, logs, data) |
+| `docker-stop.sh` | Stop and remove the Docker container (logs and data are preserved) |
 | `update_and_restart.sh` | Pull latest code from git and restart the systemd service |
 | `tag-release.sh` | Interactive tool for creating version tags with semantic versioning |
 
@@ -491,6 +549,7 @@ The Docker scripts automatically mount the following directories:
 | `./.env` | `/app/.env` | Environment configuration (via --env-file) |
 | `./certs/` | `/app/certs/` | SSL certificates (read-only) |
 | `./logs/` | `/app/logs/` | Application logs (persistent) |
+| `./data/` | `/app/data/` | SQLite database (persistent) |
 
 #### Docker HTTPS Configuration
 
@@ -830,6 +889,7 @@ Guests can only add a limited number of tracks. The host can reset limits from t
 ## Tech Stack
 
 - **Backend**: Node.js with Express
+- **Database**: SQLite with better-sqlite3
 - **Frontend**: Vanilla HTML/CSS/JavaScript
 - **API**: Spotify Web API
 - **Auth**: OAuth 2.0 with refresh tokens
