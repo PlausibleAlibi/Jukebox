@@ -877,6 +877,109 @@ sudo iptables -A INPUT -p tcp --dport 3000 -j DROP
 | `/api/admin/toggle-limits` | POST | Enable/disable track limit enforcement |
 | `/api/admin/track-limits` | GET | Get all IP track counts |
 
+### Analytics Endpoints
+
+Party Jukebox provides built-in analytics to track party activity and engagement. All analytics endpoints are public and don't require authentication.
+
+| Endpoint | Method | Description | Query Parameters |
+|----------|--------|-------------|------------------|
+| `/api/analytics/top-tracks` | GET | Get most requested tracks across all time | `?limit=10` (default: 10) |
+| `/api/analytics/top-users` | GET | Get most active users by track submission count | `?limit=10` (default: 10) |
+| `/api/analytics/stats` | GET | Get overall party statistics | None |
+| `/api/analytics/peak-hours` | GET | Get peak usage by hour of day | None |
+| `/api/analytics/user/:ip` | GET | Get statistics for specific user by IP | None |
+
+#### Analytics Data
+
+Analytics are calculated from:
+- **Party queue submissions**: Current and historical tracks added to the queue
+- **Vote activity**: All votes cast on tracks
+- **User session data**: Track counts and nicknames per IP
+- **Playback history**: Records of tracks that have been played
+
+All analytics respect data persistence across server restarts.
+
+#### Example Responses
+
+**GET /api/analytics/top-tracks**
+```json
+{
+  "tracks": [
+    {
+      "trackId": "3n3Ppam7vgaVa1iaRUc9Lp",
+      "name": "Mr. Brightside",
+      "artist": "The Killers",
+      "albumArt": "https://...",
+      "spotifyUri": "spotify:track:3n3Ppam7vgaVa1iaRUc9Lp",
+      "requestCount": 15
+    }
+  ]
+}
+```
+
+**GET /api/analytics/top-users**
+```json
+{
+  "users": [
+    {
+      "ipAddress": "192.168.1.50",
+      "nickname": "DJ Mike",
+      "trackCount": 12
+    }
+  ]
+}
+```
+
+**GET /api/analytics/stats**
+```json
+{
+  "totalTracksInQueue": 42,
+  "totalUsers": 8,
+  "totalVotes": 127,
+  "totalTracksPlayed": 35,
+  "mostVotedTrack": {
+    "trackId": "3n3Ppam7vgaVa1iaRUc9Lp",
+    "name": "Mr. Brightside",
+    "artist": "The Killers",
+    "votes": 23
+  }
+}
+```
+
+**GET /api/analytics/peak-hours**
+```json
+{
+  "hourlyStats": [
+    { "hour": 14, "trackCount": 25 },
+    { "hour": 20, "trackCount": 48 },
+    { "hour": 21, "trackCount": 62 }
+  ]
+}
+```
+
+**GET /api/analytics/user/192.168.1.50**
+```json
+{
+  "ipAddress": "192.168.1.50",
+  "nickname": "DJ Mike",
+  "totalTracksAdded": 12,
+  "totalVotesCast": 8,
+  "currentTracksInQueue": 3,
+  "lastActive": 1703012345678
+}
+```
+
+#### Using Analytics
+
+Analytics can be used to:
+- **Track party engagement**: See how many tracks and votes over time
+- **Identify popular songs**: Find crowd favorites to play more often
+- **Recognize active participants**: See who's contributing most
+- **Optimize timing**: Understand peak party hours
+- **Monitor activity**: Track overall party statistics in real-time
+
+Analytics data is stored persistently in the SQLite database and survives server restarts.
+
 ## Security Best Practices
 
 1. **Use HTTPS**: Always use HTTPS in production, especially on public networks
