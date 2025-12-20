@@ -9,6 +9,11 @@ logs/
 *.log
 npm-debug.log*
 
+# Database
+data/*.db
+data/*.db-shm
+data/*.db-wal
+
 # OS files
 .DS_Store
 Thumbs.db

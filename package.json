@@ -20,6 +20,7 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
+    "better-sqlite3": "^9.2.2",
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
     "express-rate-limit": "^8.2.1",

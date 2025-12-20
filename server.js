@@ -8,6 +8,7 @@ const rateLimit = require('express-rate-limit');
 const QRCode = require('qrcode');
 const morgan = require('morgan');
 const logger = require('./logger');
+const db = require('./database');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -90,17 +91,6 @@ let tokenData = {
   refreshToken: null,
   expiresAt: null
 };
-
-// Party queue with voting system
-let partyQueue = [];
-// Track submissions per IP: { ip: count }
-let ipTrackCount = {};
-// Votes per track: { trackId: Set of IP addresses }
-let trackVotes = {};
-// Admin session tokens (simple session management)
-let adminSessions = new Set();
-// User nicknames: { ip: nickname }
-let userNicknames = {};
 
 // Playback state cache to reduce Spotify API calls
 let playbackCache = {
@@ -953,31 +943,34 @@ app.post('/api/queue', ensureToken, async (req, res) => {
     return res.status(400).json({ error: 'Track URI is required' });
   }
 
-  // Check track limit per IP (only if enforcement is enabled)
-  const currentCount = ipTrackCount[clientIP] || 0;
-  if (enforceTrackLimits && currentCount >= MAX_TRACKS_PER_IP) {
-    logger.warn('Track limit hit', {
-      clientIP,
-      currentCount,
-      maxTracks: MAX_TRACKS_PER_IP,
-      enforceTrackLimits
-    });
-    return res.status(429).json({ 
-      error: `Track limit reached. You can only add ${MAX_TRACKS_PER_IP} tracks.`,
-      remaining: 0
-    });
-  }
-  
-  // Log track limit check at verbose level
-  logger.verbose('Track limit check', {
-    clientIP,
-    currentCount,
-    maxTracks: MAX_TRACKS_PER_IP,
-    remaining: MAX_TRACKS_PER_IP - currentCount,
-    enforceTrackLimits
-  });
-
   try {
+    // Check track limit per IP (only if enforcement is enabled)
+    let currentCount = 0;
+    if (enforceTrackLimits) {
+      currentCount = db.getUserTrackCount(clientIP);
+      if (currentCount >= MAX_TRACKS_PER_IP) {
+        logger.warn('Track limit hit', {
+          clientIP,
+          currentCount,
+          maxTracks: MAX_TRACKS_PER_IP,
+          enforceTrackLimits
+        });
+        return res.status(429).json({ 
+          error: `Track limit reached. You can only add ${MAX_TRACKS_PER_IP} tracks.`,
+          remaining: 0
+        });
+      }
+      
+      // Log track limit check at verbose level
+      logger.verbose('Track limit check', {
+        clientIP,
+        currentCount,
+        maxTracks: MAX_TRACKS_PER_IP,
+        remaining: MAX_TRACKS_PER_IP - currentCount,
+        enforceTrackLimits
+      });
+    }
+
     const response = await spotifyFetch(`/me/player/queue?uri=${encodeURIComponent(uri)}`, {
       method: 'POST'
     });
@@ -993,13 +986,10 @@ app.post('/api/queue', ensureToken, async (req, res) => {
 
     // Accept both 200 and 204 as success responses
     if (response.status === 200 || response.status === 204) {
-      // Track submission count
-      ipTrackCount[clientIP] = currentCount + 1;
-      
       // Store nickname if provided
       if (nickname) {
-        const previousNickname = userNicknames[clientIP];
-        userNicknames[clientIP] = nickname;
+        const previousNickname = db.getUserNickname(clientIP);
+        db.setUserNickname(clientIP, nickname);
         
         if (previousNickname && previousNickname !== nickname) {
           logger.verbose('Nickname updated', {
@@ -1015,11 +1005,15 @@ app.post('/api/queue', ensureToken, async (req, res) => {
         }
       }
       
+      // Increment track count
+      const newCount = db.incrementUserTrackCount(clientIP);
+      
       // Add to party queue for voting display
       // Extract track ID from Spotify URI (format: spotify:track:XXXXX)
       const uriParts = uri.split(':');
       const trackId = uriParts.length >= 3 ? uriParts[2] : uri;
-      if (trackId && !partyQueue.find(t => t.id === trackId)) {
+      
+      if (trackId) {
         const track = {
           id: trackId,
           uri,
@@ -1027,31 +1021,32 @@ app.post('/api/queue', ensureToken, async (req, res) => {
           artist: artist || 'Unknown',
           albumArt: albumArt || null,
           addedBy: clientIP,
-          addedByName: userNicknames[clientIP] || nickname || 'Guest',
+          addedByName: db.getUserNickname(clientIP) || nickname || 'Guest',
           addedAt: Date.now(),
           votes: 0
         };
-        partyQueue.push(track);
-        trackVotes[trackId] = new Set();
         
-        logger.info('Party queue: Track added', {
-          trackId,
-          trackName: name,
-          artistName: artist,
-          addedByIP: clientIP,
-          nickname: userNicknames[clientIP] || nickname || 'Guest',
-          queueSize: partyQueue.length,
-          votesCount: 0,
-          uri
-        });
+        const added = db.addToPartyQueue(track);
+        
+        if (added) {
+          logger.info('Party queue: Track added', {
+            trackId,
+            trackName: name,
+            artistName: artist,
+            addedByIP: clientIP,
+            nickname: track.addedByName,
+            queueSize: db.getPartyQueue().length,
+            votesCount: 0,
+            uri
+          });
+        }
       }
       
       logger.verbose('Track count updated', {
         clientIP,
         oldCount: currentCount,
-        newCount: currentCount + 1,
-        used: currentCount + 1,
-        remaining: MAX_TRACKS_PER_IP - (currentCount + 1),
+        newCount: newCount,
+        remaining: MAX_TRACKS_PER_IP - newCount,
         max: MAX_TRACKS_PER_IP,
         enforceTrackLimits
       });
@@ -1059,7 +1054,7 @@ app.post('/api/queue', ensureToken, async (req, res) => {
       return res.json({ 
         success: true, 
         message: 'Track added to queue',
-        remaining: MAX_TRACKS_PER_IP - (currentCount + 1)
+        remaining: MAX_TRACKS_PER_IP - newCount
       });
     }
 
@@ -1100,25 +1095,35 @@ app.post('/api/queue', ensureToken, async (req, res) => {
 
 // Get party queue with votes
 app.get('/api/party-queue', (req, res) => {
-  const clientIP = getClientIP(req);
-  const sortedQueue = [...partyQueue].sort((a, b) => b.votes - a.votes);
-  
-  // Prevent browser caching of dynamic queue data
-  res.set({
-    'Cache-Control': 'no-store, no-cache, must-revalidate, private',
-    'Pragma': 'no-cache',
-    'Expires': '0'
-  });
-  
-  res.json({
-    queue: sortedQueue.map(track => ({
-      ...track,
-      hasVoted: trackVotes[track.id]?.has(clientIP) || false
-    })),
-    remaining: enforceTrackLimits ? MAX_TRACKS_PER_IP - (ipTrackCount[clientIP] || 0) : -1,
-    maxTracks: MAX_TRACKS_PER_IP,
-    enforceTrackLimits: enforceTrackLimits
-  });
+  try {
+    const clientIP = getClientIP(req);
+    const queue = db.getPartyQueue();
+    
+    // Prevent browser caching of dynamic queue data
+    res.set({
+      'Cache-Control': 'no-store, no-cache, must-revalidate, private',
+      'Pragma': 'no-cache',
+      'Expires': '0'
+    });
+    
+    const currentCount = db.getUserTrackCount(clientIP);
+    
+    res.json({
+      queue: queue.map(track => ({
+        ...track,
+        hasVoted: db.hasUserVoted(track.id, clientIP)
+      })),
+      remaining: enforceTrackLimits ? MAX_TRACKS_PER_IP - currentCount : -1,
+      maxTracks: MAX_TRACKS_PER_IP,
+      enforceTrackLimits: enforceTrackLimits
+    });
+  } catch (err) {
+    logger.error('Failed to get party queue', { 
+      error: err.message,
+      stack: err.stack
+    });
+    res.status(500).json({ error: 'Failed to retrieve party queue' });
+  }
 });
 
 // Vote for a track
@@ -1126,58 +1131,79 @@ app.post('/api/vote/:trackId', (req, res) => {
   const { trackId } = req.params;
   const clientIP = getClientIP(req);
   
-  const track = partyQueue.find(t => t.id === trackId);
-  if (!track) {
-    return res.status(404).json({ error: 'Track not found in queue' });
-  }
-  
-  if (!trackVotes[trackId]) {
-    trackVotes[trackId] = new Set();
-  }
-  
-  if (trackVotes[trackId].has(clientIP)) {
-    // Remove vote
-    trackVotes[trackId].delete(clientIP);
-    const previousVotes = track.votes;
-    track.votes--;
-    logger.info('Party queue: Vote removed', {
+  try {
+    // Check if track exists in queue
+    const queue = db.getPartyQueue();
+    const track = queue.find(t => t.id === trackId);
+    
+    if (!track) {
+      return res.status(404).json({ error: 'Track not found in queue' });
+    }
+    
+    const hasVoted = db.hasUserVoted(trackId, clientIP);
+    
+    if (hasVoted) {
+      // Remove vote
+      db.removeVote(trackId, clientIP);
+      const newVotes = db.getVotesForTrack(trackId);
+      
+      logger.info('Party queue: Vote removed', {
+        trackId,
+        trackName: track.name,
+        voterIP: clientIP,
+        action: 'remove',
+        previousVoteCount: track.votes,
+        newVoteCount: newVotes,
+        artistName: track.artist
+      });
+      
+      return res.json({ success: true, votes: newVotes, hasVoted: false });
+    }
+    
+    // Add vote
+    db.addVote(trackId, clientIP);
+    const newVotes = db.getVotesForTrack(trackId);
+    
+    logger.info('Party queue: Vote added', {
       trackId,
       trackName: track.name,
       voterIP: clientIP,
-      action: 'remove',
-      previousVoteCount: previousVotes,
-      newVoteCount: track.votes,
+      action: 'add',
+      previousVoteCount: track.votes,
+      newVoteCount: newVotes,
       artistName: track.artist
     });
-    return res.json({ success: true, votes: track.votes, hasVoted: false });
+    
+    res.json({ success: true, votes: newVotes, hasVoted: true });
+  } catch (err) {
+    logger.error('Failed to process vote', { 
+      error: err.message,
+      trackId,
+      clientIP,
+      stack: err.stack
+    });
+    res.status(500).json({ error: 'Failed to process vote' });
   }
-  
-  // Add vote
-  trackVotes[trackId].add(clientIP);
-  const previousVotes = track.votes;
-  track.votes++;
-  logger.info('Party queue: Vote added', {
-    trackId,
-    trackName: track.name,
-    voterIP: clientIP,
-    action: 'add',
-    previousVoteCount: previousVotes,
-    newVoteCount: track.votes,
-    artistName: track.artist
-  });
-  res.json({ success: true, votes: track.votes, hasVoted: true });
 });
 
 // Get remaining tracks for current user
 app.get('/api/track-limit', (req, res) => {
-  const clientIP = getClientIP(req);
-  const currentCount = ipTrackCount[clientIP] || 0;
-  res.json({
-    used: currentCount,
-    remaining: enforceTrackLimits ? MAX_TRACKS_PER_IP - currentCount : -1,
-    max: MAX_TRACKS_PER_IP,
-    enforceTrackLimits: enforceTrackLimits
-  });
+  try {
+    const clientIP = getClientIP(req);
+    const currentCount = db.getUserTrackCount(clientIP);
+    res.json({
+      used: currentCount,
+      remaining: enforceTrackLimits ? MAX_TRACKS_PER_IP - currentCount : -1,
+      max: MAX_TRACKS_PER_IP,
+      enforceTrackLimits: enforceTrackLimits
+    });
+  } catch (err) {
+    logger.error('Failed to get track limit', { 
+      error: err.message,
+      stack: err.stack
+    });
+    res.status(500).json({ error: 'Failed to retrieve track limit' });
+  }
 });
 
 // Get current playback state
@@ -1417,24 +1443,32 @@ function requireAdmin(req, res, next) {
   }
   
   const token = authHeader.substring(7);
-  const isValidSession = adminSessions.has(token);
   
-  logger.verbose('Admin session validation', {
-    endpoint: req.path,
-    clientIP,
-    isValidSession,
-    activeSessions: adminSessions.size
-  });
-  
-  if (!isValidSession) {
-    logger.warn('Admin access denied: Invalid or expired session', {
+  try {
+    const isValidSession = db.validateAdminSession(token);
+    
+    logger.verbose('Admin session validation', {
       endpoint: req.path,
-      clientIP
+      clientIP,
+      isValidSession
     });
-    return res.status(403).json({ error: 'Invalid or expired admin session' });
+    
+    if (!isValidSession) {
+      logger.warn('Admin access denied: Invalid or expired session', {
+        endpoint: req.path,
+        clientIP
+      });
+      return res.status(403).json({ error: 'Invalid or expired admin session' });
+    }
+    
+    next();
+  } catch (err) {
+    logger.error('Admin session validation error', { 
+      error: err.message,
+      stack: err.stack
+    });
+    return res.status(500).json({ error: 'Failed to validate admin session' });
   }
-  
-  next();
 }
 
 // Admin: Check if admin is configured
@@ -1459,16 +1493,24 @@ app.post('/api/admin/login', authLimiter, (req, res) => {
   }
   
   if (password === ADMIN_PASSWORD) {
-    const token = generateAdminToken();
-    adminSessions.add(token);
-    
-    logger.info('Admin login successful', { 
-      clientIP,
-      sessionToken: token.substring(0, 8) + '...',
-      activeSessions: adminSessions.size
-    });
-    
-    return res.json({ success: true, token });
+    try {
+      const token = generateAdminToken();
+      db.createAdminSession(token);
+      
+      logger.info('Admin login successful', { 
+        clientIP,
+        sessionToken: token.substring(0, 8) + '...'
+      });
+      
+      return res.json({ success: true, token });
+    } catch (err) {
+      logger.error('Failed to create admin session', { 
+        error: err.message,
+        clientIP,
+        stack: err.stack
+      });
+      return res.status(500).json({ error: 'Failed to create admin session' });
+    }
   }
   
   logger.warn('Admin login failed: invalid password', { 
@@ -1544,48 +1586,81 @@ app.delete('/api/admin/queue/:trackId', requireAdmin, (req, res) => {
   const { trackId } = req.params;
   const clientIP = getClientIP(req);
   
-  const index = partyQueue.findIndex(t => t.id === trackId);
-  if (index === -1) {
-    return res.status(404).json({ error: 'Track not found in queue' });
+  try {
+    // Get track info before removing
+    const queue = db.getPartyQueue();
+    const removedTrack = queue.find(t => t.id === trackId);
+    
+    if (!removedTrack) {
+      return res.status(404).json({ error: 'Track not found in queue' });
+    }
+    
+    const previousQueueSize = queue.length;
+    const removed = db.removeFromPartyQueue(trackId);
+    
+    if (!removed) {
+      logger.error('Failed to remove track from queue', {
+        trackId,
+        clientIP,
+        reason: 'Database removal failed'
+      });
+      return res.status(500).json({ error: 'Failed to remove track from queue' });
+    }
+    
+    // Get actual queue size after removal
+    const newQueueSize = db.getPartyQueue().length;
+    
+    logger.info('Party queue: Track removed', {
+      trackId,
+      trackName: removedTrack.name,
+      artistName: removedTrack.artist,
+      removedBy: 'admin',
+      removedByIP: clientIP,
+      reason: 'admin_action',
+      previousQueueSize,
+      newQueueSize: newQueueSize,
+      hadVotes: removedTrack.votes || 0
+    });
+    
+    res.json({ success: true, message: 'Track removed from party queue' });
+  } catch (err) {
+    logger.error('Failed to remove track from queue', { 
+      error: err.message,
+      trackId,
+      clientIP,
+      stack: err.stack
+    });
+    res.status(500).json({ error: 'Failed to remove track from queue' });
   }
-  
-  const removedTrack = partyQueue[index];
-  const previousQueueSize = partyQueue.length;
-  partyQueue.splice(index, 1);
-  delete trackVotes[trackId];
-  
-  logger.info('Party queue: Track removed', {
-    trackId,
-    trackName: removedTrack.name,
-    artistName: removedTrack.artist,
-    removedBy: 'admin',
-    removedByIP: clientIP,
-    reason: 'admin_action',
-    previousQueueSize,
-    newQueueSize: partyQueue.length,
-    hadVotes: removedTrack.votes || 0
-  });
-  res.json({ success: true, message: 'Track removed from party queue' });
 });
 
 // Admin: Clear all party queue
 app.delete('/api/admin/queue', requireAdmin, (req, res) => {
   const clientIP = getClientIP(req);
-  const previousQueueSize = partyQueue.length;
-  const clearedTracks = partyQueue.length;
   
-  partyQueue = [];
-  trackVotes = {};
-  
-  logger.info('Party queue: Cleared', {
-    clearedBy: 'admin',
-    clearedByIP: clientIP,
-    reason: 'admin_action',
-    tracksCleared: clearedTracks,
-    previousQueueSize,
-    newQueueSize: 0
-  });
-  res.json({ success: true, message: 'Party queue cleared' });
+  try {
+    const queue = db.getPartyQueue();
+    const previousQueueSize = queue.length;
+    const clearedTracks = db.clearPartyQueue();
+    
+    logger.info('Party queue: Cleared', {
+      clearedBy: 'admin',
+      clearedByIP: clientIP,
+      reason: 'admin_action',
+      tracksCleared: clearedTracks,
+      previousQueueSize,
+      newQueueSize: 0
+    });
+    
+    res.json({ success: true, message: 'Party queue cleared' });
+  } catch (err) {
+    logger.error('Failed to clear party queue', { 
+      error: err.message,
+      clientIP,
+      stack: err.stack
+    });
+    res.status(500).json({ error: 'Failed to clear party queue' });
+  }
 });
 
 // Admin: Reset track limits for an IP or all
@@ -1593,52 +1668,71 @@ app.post('/api/admin/reset-limits', requireAdmin, (req, res) => {
   const ip = req.body?.ip;
   const clientIP = getClientIP(req);
   
-  if (ip) {
-    const previousCount = ipTrackCount[ip] || 0;
-    delete ipTrackCount[ip];
-    
-    logger.info('Track limit reset', {
+  try {
+    if (ip) {
+      const previousCount = db.getUserTrackCount(ip);
+      db.resetUserTrackCount(ip);
+      
+      logger.info('Track limit reset', {
+        targetIP: ip,
+        previousCount,
+        newCount: 0,
+        resetBy: 'admin',
+        resetByIP: clientIP,
+        reason: 'admin_action'
+      });
+      
+      logger.verbose('IP track count changed', {
+        ip,
+        oldCount: previousCount,
+        newCount: 0,
+        action: 'reset',
+        triggeredBy: 'admin'
+      });
+      
+      res.json({ success: true, message: `Track limit reset for ${ip}` });
+    } else {
+      const allCounts = db.getAllTrackCounts();
+      const totalIPs = Object.keys(allCounts).length;
+      db.resetAllTrackCounts();
+      
+      logger.info('All track limits reset', {
+        ipsCleared: totalIPs,
+        resetBy: 'admin',
+        resetByIP: clientIP,
+        reason: 'admin_action'
+      });
+      
+      logger.debug('Track limits cleared', {
+        previousCounts: allCounts,
+        clearedIPCount: totalIPs
+      });
+      
+      res.json({ success: true, message: 'All track limits reset' });
+    }
+  } catch (err) {
+    logger.error('Failed to reset track limits', { 
+      error: err.message,
+      clientIP,
       targetIP: ip,
-      previousCount,
-      newCount: 0,
-      resetBy: 'admin',
-      resetByIP: clientIP,
-      reason: 'admin_action'
+      stack: err.stack
     });
-    
-    logger.verbose('IP track count changed', {
-      ip,
-      oldCount: previousCount,
-      newCount: 0,
-      action: 'reset',
-      triggeredBy: 'admin'
-    });
-    
-    res.json({ success: true, message: `Track limit reset for ${ip}` });
-  } else {
-    const totalIPs = Object.keys(ipTrackCount).length;
-    const allCounts = { ...ipTrackCount };
-    ipTrackCount = {};
-    
-    logger.info('All track limits reset', {
-      ipsCleared: totalIPs,
-      resetBy: 'admin',
-      resetByIP: clientIP,
-      reason: 'admin_action'
-    });
-    
-    logger.debug('Track limits cleared', {
-      previousCounts: allCounts,
-      clearedIPCount: totalIPs
-    });
-    
-    res.json({ success: true, message: 'All track limits reset' });
+    res.status(500).json({ error: 'Failed to reset track limits' });
   }
 });
 
 // Admin: Get all IPs with their track counts
 app.get('/api/admin/track-limits', requireAdmin, (req, res) => {
-  res.json({ limits: ipTrackCount });
+  try {
+    const limits = db.getAllTrackCounts();
+    res.json({ limits });
+  } catch (err) {
+    logger.error('Failed to get track limits', { 
+      error: err.message,
+      stack: err.stack
+    });
+    res.status(500).json({ error: 'Failed to retrieve track limits' });
+  }
 });
 
 // Admin: Pause playback
@@ -1803,6 +1897,29 @@ app.get('/api/oauth-config', (req, res) => {
     redirectUri: getSpotifyRedirectUri()
   });
 });
+
+// Initialize database before starting the server
+try {
+  db.initializeDatabase();
+  logger.info('Database initialized successfully');
+  
+  // Schedule periodic cleanup of expired admin sessions (every hour)
+  setInterval(() => {
+    try {
+      db.cleanupExpiredSessions();
+    } catch (err) {
+      logger.error('Failed to cleanup expired sessions', { 
+        error: err.message 
+      });
+    }
+  }, 60 * 60 * 1000); // 1 hour
+} catch (err) {
+  logger.error('Failed to initialize database', { 
+    error: err.message,
+    stack: err.stack
+  });
+  process.exit(1);
+}
 
 // Start server
 if (USE_HTTPS) {
