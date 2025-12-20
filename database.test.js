@@ -251,6 +251,163 @@ describe('Database Schema - camelCase Naming', () => {
     });
   });
 
+  describe('Analytics Functions', () => {
+    // Setup test data for analytics
+    before(() => {
+      // Add some tracks to party queue
+      const tracks = [
+        { id: 'analytics-1', uri: 'spotify:track:analytics-1', name: 'Song 1', artist: 'Artist 1', albumArt: 'http://art1.jpg', spotifyUri: 'spotify:track:analytics-1', addedBy: '192.168.1.50', addedAt: Date.now() - 3600000 }, // 1 hour ago
+        { id: 'analytics-2', uri: 'spotify:track:analytics-2', name: 'Song 2', artist: 'Artist 2', albumArt: 'http://art2.jpg', spotifyUri: 'spotify:track:analytics-2', addedBy: '192.168.1.51', addedAt: Date.now() - 7200000 }, // 2 hours ago
+        { id: 'analytics-1', uri: 'spotify:track:analytics-1', name: 'Song 1', artist: 'Artist 1', albumArt: 'http://art1.jpg', spotifyUri: 'spotify:track:analytics-1', addedBy: '192.168.1.52', addedAt: Date.now() - 10800000 }, // 3 hours ago (same track, different user)
+      ];
+      
+      tracks.forEach(track => {
+        db.addToPartyQueue(track);
+      });
+      
+      // Create user sessions for the test IPs
+      db.incrementUserTrackCount('192.168.1.50');
+      db.incrementUserTrackCount('192.168.1.51');
+      db.incrementUserTrackCount('192.168.1.52');
+      
+      // Add some votes
+      db.addVote('analytics-1', '192.168.1.60');
+      db.addVote('analytics-1', '192.168.1.61');
+      db.addVote('analytics-2', '192.168.1.62');
+      
+      // Add tracks to playback history
+      db.addToPlaybackHistory({ id: 'analytics-1', uri: 'spotify:track:analytics-1', name: 'Song 1', artist: 'Artist 1', addedBy: '192.168.1.50' });
+      db.addToPlaybackHistory({ id: 'analytics-2', uri: 'spotify:track:analytics-2', name: 'Song 2', artist: 'Artist 2', addedBy: '192.168.1.51' });
+    });
+
+    it('should get top requested tracks with correct properties', () => {
+      const topTracks = db.getTopRequestedTracks(5);
+      
+      assert.ok(Array.isArray(topTracks), 'Should return array');
+      
+      if (topTracks.length > 0) {
+        const track = topTracks[0];
+        assert.ok('trackId' in track, 'Should have trackId property');
+        assert.ok('name' in track, 'Should have name property');
+        assert.ok('artist' in track, 'Should have artist property');
+        assert.ok('albumArt' in track, 'Should have albumArt property');
+        assert.ok('spotifyUri' in track, 'Should have spotifyUri property');
+        assert.ok('requestCount' in track, 'Should have requestCount property');
+        assert.strictEqual(typeof track.requestCount, 'number', 'requestCount should be number');
+      }
+    });
+
+    it('should respect limit parameter in top tracks', () => {
+      const topTracks = db.getTopRequestedTracks(1);
+      assert.ok(topTracks.length <= 1, 'Should respect limit');
+    });
+
+    it('should get most active users with correct properties', () => {
+      const activeUsers = db.getMostActiveUsers(5);
+      
+      assert.ok(Array.isArray(activeUsers), 'Should return array');
+      
+      if (activeUsers.length > 0) {
+        const user = activeUsers[0];
+        assert.ok('ipAddress' in user, 'Should have ipAddress property');
+        assert.ok('nickname' in user, 'Should have nickname property');
+        assert.ok('trackCount' in user, 'Should have trackCount property');
+        assert.strictEqual(typeof user.trackCount, 'number', 'trackCount should be number');
+      }
+    });
+
+    it('should respect limit parameter in top users', () => {
+      const activeUsers = db.getMostActiveUsers(1);
+      assert.ok(activeUsers.length <= 1, 'Should respect limit');
+    });
+
+    it('should get total votes cast', () => {
+      const totalVotes = db.getTotalVotesCast();
+      
+      assert.strictEqual(typeof totalVotes, 'number', 'Should return number');
+      assert.ok(totalVotes >= 3, 'Should have at least 3 votes from setup');
+    });
+
+    it('should get peak usage by hour', () => {
+      const hourlyStats = db.getPeakUsageByHour();
+      
+      assert.ok(Array.isArray(hourlyStats), 'Should return array');
+      
+      if (hourlyStats.length > 0) {
+        const hourStat = hourlyStats[0];
+        assert.ok('hour' in hourStat, 'Should have hour property');
+        assert.ok('trackCount' in hourStat, 'Should have trackCount property');
+        assert.strictEqual(typeof hourStat.hour, 'number', 'hour should be number');
+        assert.ok(hourStat.hour >= 0 && hourStat.hour <= 23, 'hour should be 0-23');
+        assert.strictEqual(typeof hourStat.trackCount, 'number', 'trackCount should be number');
+      }
+    });
+
+    it('should get general stats with correct structure', () => {
+      const stats = db.getGeneralStats();
+      
+      assert.ok(typeof stats === 'object', 'Should return object');
+      assert.ok('totalTracksInQueue' in stats, 'Should have totalTracksInQueue');
+      assert.ok('totalUsers' in stats, 'Should have totalUsers');
+      assert.ok('totalVotes' in stats, 'Should have totalVotes');
+      assert.ok('totalTracksPlayed' in stats, 'Should have totalTracksPlayed');
+      assert.ok('mostVotedTrack' in stats, 'Should have mostVotedTrack');
+      
+      assert.strictEqual(typeof stats.totalTracksInQueue, 'number', 'totalTracksInQueue should be number');
+      assert.strictEqual(typeof stats.totalUsers, 'number', 'totalUsers should be number');
+      assert.strictEqual(typeof stats.totalVotes, 'number', 'totalVotes should be number');
+      assert.strictEqual(typeof stats.totalTracksPlayed, 'number', 'totalTracksPlayed should be number');
+      
+      if (stats.mostVotedTrack) {
+        assert.ok('trackId' in stats.mostVotedTrack, 'mostVotedTrack should have trackId');
+        assert.ok('name' in stats.mostVotedTrack, 'mostVotedTrack should have name');
+        assert.ok('artist' in stats.mostVotedTrack, 'mostVotedTrack should have artist');
+        assert.ok('votes' in stats.mostVotedTrack, 'mostVotedTrack should have votes');
+      }
+    });
+
+    it('should get user stats with correct structure', () => {
+      const userIP = '192.168.1.50';
+      const stats = db.getUserStats(userIP);
+      
+      assert.ok(stats !== null, 'Should return stats for existing user');
+      assert.ok('ipAddress' in stats, 'Should have ipAddress');
+      assert.ok('nickname' in stats, 'Should have nickname');
+      assert.ok('totalTracksAdded' in stats, 'Should have totalTracksAdded');
+      assert.ok('totalVotesCast' in stats, 'Should have totalVotesCast');
+      assert.ok('currentTracksInQueue' in stats, 'Should have currentTracksInQueue');
+      assert.ok('lastActive' in stats, 'Should have lastActive');
+      
+      assert.strictEqual(stats.ipAddress, userIP, 'Should return correct IP');
+      assert.strictEqual(typeof stats.totalTracksAdded, 'number', 'totalTracksAdded should be number');
+      assert.strictEqual(typeof stats.totalVotesCast, 'number', 'totalVotesCast should be number');
+      assert.strictEqual(typeof stats.currentTracksInQueue, 'number', 'currentTracksInQueue should be number');
+      assert.strictEqual(typeof stats.lastActive, 'number', 'lastActive should be number');
+    });
+
+    it('should return null for non-existent user', () => {
+      const stats = db.getUserStats('192.168.1.999');
+      assert.strictEqual(stats, null, 'Should return null for non-existent user');
+    });
+
+    it('should handle empty database gracefully', () => {
+      // Clear all data
+      db.clearPartyQueue();
+      
+      const topTracks = db.getTopRequestedTracks(10);
+      assert.ok(Array.isArray(topTracks), 'Should return array for empty database');
+      assert.strictEqual(topTracks.length, 0, 'Should return empty array');
+      
+      const hourlyStats = db.getPeakUsageByHour();
+      assert.ok(Array.isArray(hourlyStats), 'Should return array for empty database');
+      assert.strictEqual(hourlyStats.length, 0, 'Should return empty array');
+      
+      const stats = db.getGeneralStats();
+      assert.strictEqual(stats.totalTracksInQueue, 0, 'Should return 0 for empty queue');
+      assert.strictEqual(stats.mostVotedTrack, null, 'Should return null for no tracks');
+    });
+  });
+
   describe('Clear Operations', () => {
     it('should clear party queue', () => {
       // Add a track first

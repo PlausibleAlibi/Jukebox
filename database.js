@@ -798,9 +798,9 @@ function addToPlaybackHistory(track, playedAt = Date.now()) {
 // ============================================================================
 
 /**
- * Get top requested tracks
- * @param {number} limit - Number of tracks to return
- * @returns {Array} Array of tracks with request counts
+ * Get the most requested tracks across all time
+ * @param {number} limit - Number of results to return (default: 10)
+ * @returns {Array} Array of tracks with request count
  */
 function getTopRequestedTracks(limit = 10) {
   try {
@@ -809,14 +809,18 @@ function getTopRequestedTracks(limit = 10) {
         trackId,
         name,
         artist,
-        COUNT(*) as request_count
-      FROM playbackHistory
+        albumArt,
+        spotifyUri,
+        COUNT(*) as requestCount
+      FROM partyQueue
       GROUP BY trackId
-      ORDER BY request_count DESC
+      ORDER BY requestCount DESC
       LIMIT ?
     `);
     
-    return stmt.all(limit);
+    const tracks = stmt.all(limit);
+    logger.verbose('Top requested tracks retrieved', { count: tracks.length });
+    return tracks;
   } catch (err) {
     logger.error('Failed to get top requested tracks', { error: err.message });
     throw err;
@@ -824,24 +828,26 @@ function getTopRequestedTracks(limit = 10) {
 }
 
 /**
- * Get most active users by track count
- * @param {number} limit - Number of users to return
- * @returns {Array} Array of IPs with track counts
+ * Get the most active users by track submission count
+ * @param {number} limit - Number of results to return (default: 10)
+ * @returns {Array} Array of users with submission count
  */
 function getMostActiveUsers(limit = 10) {
   try {
     const stmt = db.prepare(`
       SELECT 
         ipAddress,
-        trackCount,
-        nickname
+        nickname,
+        trackCount
       FROM userSessions
       WHERE trackCount > 0
       ORDER BY trackCount DESC
       LIMIT ?
     `);
     
-    return stmt.all(limit);
+    const users = stmt.all(limit);
+    logger.verbose('Most active users retrieved', { count: users.length });
+    return users;
   } catch (err) {
     logger.error('Failed to get most active users', { error: err.message });
     throw err;
@@ -849,8 +855,180 @@ function getMostActiveUsers(limit = 10) {
 }
 
 /**
+ * Get total number of votes cast across all tracks
+ * @returns {number} Total vote count
+ */
+function getTotalVotesCast() {
+  try {
+    const stmt = db.prepare(`
+      SELECT COUNT(*) as count
+      FROM trackVotes
+    `);
+    
+    const result = stmt.get();
+    const count = result.count;
+    logger.verbose('Total votes cast retrieved', { count });
+    return count;
+  } catch (err) {
+    logger.error('Failed to get total votes cast', { error: err.message });
+    throw err;
+  }
+}
+
+/**
+ * Get peak usage statistics by hour of day
+ * @returns {Array} Array of hour stats with track counts
+ */
+function getPeakUsageByHour() {
+  try {
+    const stmt = db.prepare(`
+      SELECT 
+        CAST(strftime('%H', datetime(addedAt / 1000, 'unixepoch')) AS INTEGER) as hour,
+        COUNT(*) as trackCount
+      FROM partyQueue
+      GROUP BY hour
+      ORDER BY hour
+    `);
+    
+    const hourlyStats = stmt.all();
+    logger.verbose('Peak usage by hour retrieved', { hours: hourlyStats.length });
+    return hourlyStats;
+  } catch (err) {
+    logger.error('Failed to get peak usage by hour', { error: err.message });
+    throw err;
+  }
+}
+
+/**
+ * Get overall party statistics
+ * @returns {Object} Statistics object with various metrics
+ */
+function getGeneralStats() {
+  try {
+    // Total tracks in queue
+    const queueStmt = db.prepare(`
+      SELECT COUNT(*) as count
+      FROM partyQueue
+    `);
+    const queueResult = queueStmt.get();
+    
+    // Total users
+    const usersStmt = db.prepare(`
+      SELECT COUNT(*) as count
+      FROM userSessions
+    `);
+    const usersResult = usersStmt.get();
+    
+    // Total votes
+    const votesStmt = db.prepare(`
+      SELECT COUNT(*) as count
+      FROM trackVotes
+    `);
+    const votesResult = votesStmt.get();
+    
+    // Total tracks played
+    const playedStmt = db.prepare(`
+      SELECT COUNT(*) as count
+      FROM playbackHistory
+    `);
+    const playedResult = playedStmt.get();
+    
+    // Most voted track
+    const mostVotedStmt = db.prepare(`
+      SELECT 
+        pq.trackId,
+        pq.name,
+        pq.artist,
+        COUNT(tv.id) as votes
+      FROM partyQueue pq
+      LEFT JOIN trackVotes tv ON pq.trackId = tv.trackId
+      GROUP BY pq.trackId
+      ORDER BY votes DESC
+      LIMIT 1
+    `);
+    const mostVotedResult = mostVotedStmt.get();
+    
+    const stats = {
+      totalTracksInQueue: queueResult.count,
+      totalUsers: usersResult.count,
+      totalVotes: votesResult.count,
+      totalTracksPlayed: playedResult.count,
+      mostVotedTrack: mostVotedResult && mostVotedResult.votes > 0 ? {
+        trackId: mostVotedResult.trackId,
+        name: mostVotedResult.name,
+        artist: mostVotedResult.artist,
+        votes: mostVotedResult.votes
+      } : null
+    };
+    
+    logger.verbose('General stats retrieved', stats);
+    return stats;
+  } catch (err) {
+    logger.error('Failed to get general stats', { error: err.message });
+    throw err;
+  }
+}
+
+/**
+ * Get statistics for a specific user by IP
+ * @param {string} ipAddress - User's IP address
+ * @returns {Object} User statistics
+ */
+function getUserStats(ipAddress) {
+  try {
+    // Get user session data
+    const userStmt = db.prepare(`
+      SELECT 
+        ipAddress,
+        nickname,
+        trackCount,
+        lastRequest
+      FROM userSessions
+      WHERE ipAddress = ?
+    `);
+    const userResult = userStmt.get(ipAddress);
+    
+    if (!userResult) {
+      return null;
+    }
+    
+    // Count votes cast by this IP
+    const votesStmt = db.prepare(`
+      SELECT COUNT(*) as count
+      FROM trackVotes
+      WHERE voterIp = ?
+    `);
+    const votesResult = votesStmt.get(ipAddress);
+    
+    // Count tracks currently in queue by this IP
+    const queueStmt = db.prepare(`
+      SELECT COUNT(*) as count
+      FROM partyQueue
+      WHERE addedByIp = ?
+    `);
+    const queueResult = queueStmt.get(ipAddress);
+    
+    const stats = {
+      ipAddress: userResult.ipAddress,
+      nickname: userResult.nickname || null,
+      totalTracksAdded: userResult.trackCount,
+      totalVotesCast: votesResult.count,
+      currentTracksInQueue: queueResult.count,
+      lastActive: userResult.lastRequest
+    };
+    
+    logger.verbose('User stats retrieved', { ipAddress, stats });
+    return stats;
+  } catch (err) {
+    logger.error('Failed to get user stats', { error: err.message, ipAddress });
+    throw err;
+  }
+}
+
+/**
  * Get playback statistics
  * @returns {Object} Statistics object
+ * @deprecated Use getGeneralStats() instead for comprehensive statistics
  */
 function getPlaybackStats() {
   try {
@@ -937,5 +1115,9 @@ module.exports = {
   // Analytics
   getTopRequestedTracks,
   getMostActiveUsers,
+  getTotalVotesCast,
+  getPeakUsageByHour,
+  getGeneralStats,
+  getUserStats,
   getPlaybackStats
 };

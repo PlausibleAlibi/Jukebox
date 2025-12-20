@@ -1884,6 +1884,136 @@ app.post('/api/admin/toggle-limits', requireAdmin, (req, res) => {
   });
 });
 
+// ============================================================================
+// Analytics Endpoints
+// ============================================================================
+
+// Get top requested tracks
+app.get('/api/analytics/top-tracks', (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit, 10) || 10;
+    const clientIP = getClientIP(req);
+    
+    logger.info('Analytics query', {
+      endpoint: '/api/analytics/top-tracks',
+      limit: limit,
+      clientIP: clientIP
+    });
+    
+    const tracks = db.getTopRequestedTracks(limit);
+    logger.verbose('Analytics: Top tracks retrieved', { count: tracks.length });
+    
+    res.json({ tracks });
+  } catch (err) {
+    logger.error('Analytics query failed', { 
+      endpoint: '/api/analytics/top-tracks', 
+      error: err.message 
+    });
+    res.status(500).json({ error: 'Failed to retrieve analytics' });
+  }
+});
+
+// Get most active users
+app.get('/api/analytics/top-users', (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit, 10) || 10;
+    const clientIP = getClientIP(req);
+    
+    logger.info('Analytics query', {
+      endpoint: '/api/analytics/top-users',
+      limit: limit,
+      clientIP: clientIP
+    });
+    
+    const users = db.getMostActiveUsers(limit);
+    logger.verbose('Analytics: Top users retrieved', { count: users.length });
+    
+    res.json({ users });
+  } catch (err) {
+    logger.error('Analytics query failed', { 
+      endpoint: '/api/analytics/top-users', 
+      error: err.message 
+    });
+    res.status(500).json({ error: 'Failed to retrieve analytics' });
+  }
+});
+
+// Get general statistics
+app.get('/api/analytics/stats', (req, res) => {
+  try {
+    const clientIP = getClientIP(req);
+    
+    logger.info('Analytics query', {
+      endpoint: '/api/analytics/stats',
+      clientIP: clientIP
+    });
+    
+    const stats = db.getGeneralStats();
+    logger.verbose('Analytics: General stats retrieved', stats);
+    
+    res.json(stats);
+  } catch (err) {
+    logger.error('Analytics query failed', { 
+      endpoint: '/api/analytics/stats', 
+      error: err.message 
+    });
+    res.status(500).json({ error: 'Failed to retrieve analytics' });
+  }
+});
+
+// Get peak usage by hour
+app.get('/api/analytics/peak-hours', (req, res) => {
+  try {
+    const clientIP = getClientIP(req);
+    
+    logger.info('Analytics query', {
+      endpoint: '/api/analytics/peak-hours',
+      clientIP: clientIP
+    });
+    
+    const hourlyStats = db.getPeakUsageByHour();
+    logger.verbose('Analytics: Peak hours retrieved', { count: hourlyStats.length });
+    
+    res.json({ hourlyStats });
+  } catch (err) {
+    logger.error('Analytics query failed', { 
+      endpoint: '/api/analytics/peak-hours', 
+      error: err.message 
+    });
+    res.status(500).json({ error: 'Failed to retrieve analytics' });
+  }
+});
+
+// Get user-specific statistics
+app.get('/api/analytics/user/:ip', (req, res) => {
+  try {
+    const clientIP = getClientIP(req);
+    const targetIP = req.params.ip;
+    
+    logger.info('Analytics query', {
+      endpoint: '/api/analytics/user/:ip',
+      targetIP: targetIP,
+      clientIP: clientIP
+    });
+    
+    const stats = db.getUserStats(targetIP);
+    
+    if (!stats) {
+      logger.verbose('Analytics: User not found', { targetIP });
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    logger.verbose('Analytics: User stats retrieved', { targetIP });
+    res.json(stats);
+  } catch (err) {
+    logger.error('Analytics query failed', { 
+      endpoint: '/api/analytics/user/:ip', 
+      error: err.message 
+    });
+    res.status(500).json({ error: 'Failed to retrieve analytics' });
+  }
+});
+
 // Serve the main page
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
