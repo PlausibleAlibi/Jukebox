@@ -10,6 +10,40 @@ const ADMIN_SESSION_EXPIRY = parseInt(process.env.ADMIN_SESSION_EXPIRY, 10) || 8
 let db = null;
 
 /**
+ * Check for old snake_case schema and migrate to camelCase
+ */
+function migrateFromOldSchema() {
+  try {
+    // Check if old schema exists by looking for the old table name
+    const tableCheck = db.prepare(`
+      SELECT name FROM sqlite_master 
+      WHERE type='table' AND name='party_queue'
+    `).get();
+    
+    if (tableCheck) {
+      logger.warn('Old snake_case database schema detected - migrating to camelCase naming');
+      logger.info('Dropping old tables and recreating with new schema');
+      
+      // Drop all old tables
+      const oldTables = ['party_queue', 'track_votes', 'user_sessions', 'playback_history', 'admin_sessions'];
+      for (const table of oldTables) {
+        try {
+          db.prepare(`DROP TABLE IF EXISTS ${table}`).run();
+          logger.debug(`Dropped old table: ${table}`);
+        } catch (err) {
+          logger.warn(`Failed to drop table ${table}`, { error: err.message });
+        }
+      }
+      
+      logger.info('Old schema migration complete - new tables will be created with camelCase names');
+    }
+  } catch (err) {
+    logger.error('Schema migration check failed', { error: err.message });
+    throw err;
+  }
+}
+
+/**
  * Initialize database and create tables
  */
 function initializeDatabase() {
@@ -30,6 +64,9 @@ function initializeDatabase() {
       path: DATABASE_PATH,
       journalMode: 'WAL'
     });
+
+    // Check for old schema and migrate if needed
+    migrateFromOldSchema();
 
     // Create tables
     createTables();
@@ -54,64 +91,64 @@ function initializeDatabase() {
 function createTables() {
   const schema = `
     -- Party queue tracks
-    -- Note: UNIQUE constraint on (track_id, added_by_ip) prevents same user from adding same track twice
-    CREATE TABLE IF NOT EXISTS party_queue (
+    -- Note: UNIQUE constraint on (trackId, addedByIp) prevents same user from adding same track twice
+    CREATE TABLE IF NOT EXISTS partyQueue (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      track_id TEXT NOT NULL,
-      spotify_uri TEXT NOT NULL,
+      trackId TEXT NOT NULL,
+      spotifyUri TEXT NOT NULL,
       name TEXT NOT NULL,
       artist TEXT NOT NULL,
-      album_art TEXT,
-      added_by_ip TEXT NOT NULL,
-      added_at INTEGER NOT NULL,
+      albumArt TEXT,
+      addedByIp TEXT NOT NULL,
+      addedAt INTEGER NOT NULL,
       nickname TEXT,
-      UNIQUE(track_id, added_by_ip)
+      UNIQUE(trackId, addedByIp)
     );
 
     -- Track votes
-    CREATE TABLE IF NOT EXISTS track_votes (
+    CREATE TABLE IF NOT EXISTS trackVotes (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      track_id TEXT NOT NULL,
-      voter_ip TEXT NOT NULL,
-      voted_at INTEGER NOT NULL,
-      UNIQUE(track_id, voter_ip)
+      trackId TEXT NOT NULL,
+      voterIp TEXT NOT NULL,
+      votedAt INTEGER NOT NULL,
+      UNIQUE(trackId, voterIp)
     );
 
     -- User sessions (track counts and nicknames)
-    CREATE TABLE IF NOT EXISTS user_sessions (
-      ip_address TEXT PRIMARY KEY,
-      track_count INTEGER DEFAULT 0,
+    CREATE TABLE IF NOT EXISTS userSessions (
+      ipAddress TEXT PRIMARY KEY,
+      trackCount INTEGER DEFAULT 0,
       nickname TEXT,
-      last_request INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
+      lastRequest INTEGER NOT NULL,
+      updatedAt INTEGER NOT NULL
     );
 
     -- Playback history (for analytics)
-    CREATE TABLE IF NOT EXISTS playback_history (
+    CREATE TABLE IF NOT EXISTS playbackHistory (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      track_id TEXT NOT NULL,
-      spotify_uri TEXT NOT NULL,
+      trackId TEXT NOT NULL,
+      spotifyUri TEXT NOT NULL,
       name TEXT NOT NULL,
       artist TEXT NOT NULL,
-      added_by_ip TEXT,
-      played_at INTEGER NOT NULL
+      addedByIp TEXT,
+      playedAt INTEGER NOT NULL
     );
 
     -- Admin sessions (persistent admin tokens)
-    CREATE TABLE IF NOT EXISTS admin_sessions (
+    CREATE TABLE IF NOT EXISTS adminSessions (
       token TEXT PRIMARY KEY,
-      created_at INTEGER NOT NULL,
-      expires_at INTEGER NOT NULL,
-      last_activity INTEGER NOT NULL
+      createdAt INTEGER NOT NULL,
+      expiresAt INTEGER NOT NULL,
+      lastActivity INTEGER NOT NULL
     );
 
     -- Create indexes for performance
-    CREATE INDEX IF NOT EXISTS idx_party_queue_track_id ON party_queue(track_id);
-    CREATE INDEX IF NOT EXISTS idx_party_queue_added_by ON party_queue(added_by_ip);
-    CREATE INDEX IF NOT EXISTS idx_track_votes_track_id ON track_votes(track_id);
-    CREATE INDEX IF NOT EXISTS idx_track_votes_voter_ip ON track_votes(voter_ip);
-    CREATE INDEX IF NOT EXISTS idx_playback_history_played_at ON playback_history(played_at);
-    CREATE INDEX IF NOT EXISTS idx_admin_sessions_expires_at ON admin_sessions(expires_at);
+    CREATE INDEX IF NOT EXISTS idxPartyQueueTrackId ON partyQueue(trackId);
+    CREATE INDEX IF NOT EXISTS idxPartyQueueAddedBy ON partyQueue(addedByIp);
+    CREATE INDEX IF NOT EXISTS idxTrackVotesTrackId ON trackVotes(trackId);
+    CREATE INDEX IF NOT EXISTS idxTrackVotesVoterIp ON trackVotes(voterIp);
+    CREATE INDEX IF NOT EXISTS idxPlaybackHistoryPlayedAt ON playbackHistory(playedAt);
+    CREATE INDEX IF NOT EXISTS idxAdminSessionsExpiresAt ON adminSessions(expiresAt);
   `;
 
   db.exec(schema);
@@ -126,12 +163,12 @@ function createTables() {
  * Add track to party queue
  * @param {Object} track - Track object with id, uri, name, artist, albumArt, addedBy, addedByName, addedAt
  * @returns {boolean} Success status (false if track already exists for this user)
- * @note Uses UNIQUE constraint on (track_id, added_by_ip) - same user can't add same track twice
+ * @note Uses UNIQUE constraint on (trackId, addedByIp) - same user can't add same track twice
  */
 function addToPartyQueue(track) {
   try {
     const stmt = db.prepare(`
-      INSERT OR IGNORE INTO party_queue (track_id, spotify_uri, name, artist, album_art, added_by_ip, added_at, nickname)
+      INSERT OR IGNORE INTO partyQueue (trackId, spotifyUri, name, artist, albumArt, addedByIp, addedAt, nickname)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
     
@@ -173,19 +210,19 @@ function getPartyQueue() {
   try {
     const stmt = db.prepare(`
       SELECT 
-        pq.track_id as id,
-        pq.spotify_uri as uri,
+        pq.trackId as id,
+        pq.spotifyUri as uri,
         pq.name,
         pq.artist,
-        pq.album_art as albumArt,
-        pq.added_by_ip as addedBy,
+        pq.albumArt as albumArt,
+        pq.addedByIp as addedBy,
         pq.nickname as addedByName,
-        pq.added_at as addedAt,
+        pq.addedAt as addedAt,
         COUNT(tv.id) as votes
-      FROM party_queue pq
-      LEFT JOIN track_votes tv ON pq.track_id = tv.track_id
+      FROM partyQueue pq
+      LEFT JOIN trackVotes tv ON pq.trackId = tv.trackId
       GROUP BY pq.id
-      ORDER BY votes DESC, pq.added_at ASC
+      ORDER BY votes DESC, pq.addedAt ASC
     `);
     
     const tracks = stmt.all();
@@ -208,8 +245,8 @@ function getPartyQueue() {
  */
 function removeFromPartyQueue(trackId) {
   try {
-    const deleteVotes = db.prepare('DELETE FROM track_votes WHERE track_id = ?');
-    const deleteTrack = db.prepare('DELETE FROM party_queue WHERE track_id = ?');
+    const deleteVotes = db.prepare('DELETE FROM trackVotes WHERE trackId = ?');
+    const deleteTrack = db.prepare('DELETE FROM partyQueue WHERE trackId = ?');
     
     // Use transaction for atomicity
     const transaction = db.transaction(() => {
@@ -240,8 +277,8 @@ function removeFromPartyQueue(trackId) {
  */
 function clearPartyQueue() {
   try {
-    const deleteVotes = db.prepare('DELETE FROM track_votes');
-    const deleteQueue = db.prepare('DELETE FROM party_queue');
+    const deleteVotes = db.prepare('DELETE FROM trackVotes');
+    const deleteQueue = db.prepare('DELETE FROM partyQueue');
     
     // Use transaction for atomicity
     const transaction = db.transaction(() => {
@@ -274,7 +311,7 @@ function clearPartyQueue() {
 function addVote(trackId, voterIP) {
   try {
     const stmt = db.prepare(`
-      INSERT OR IGNORE INTO track_votes (track_id, voter_ip, voted_at)
+      INSERT OR IGNORE INTO trackVotes (trackId, voterIp, votedAt)
       VALUES (?, ?, ?)
     `);
     
@@ -305,8 +342,8 @@ function addVote(trackId, voterIP) {
 function removeVote(trackId, voterIP) {
   try {
     const stmt = db.prepare(`
-      DELETE FROM track_votes
-      WHERE track_id = ? AND voter_ip = ?
+      DELETE FROM trackVotes
+      WHERE trackId = ? AND voterIp = ?
     `);
     
     const result = stmt.run(trackId, voterIP);
@@ -336,8 +373,8 @@ function getVotesForTrack(trackId) {
   try {
     const stmt = db.prepare(`
       SELECT COUNT(*) as count
-      FROM track_votes
-      WHERE track_id = ?
+      FROM trackVotes
+      WHERE trackId = ?
     `);
     
     const result = stmt.get(trackId);
@@ -361,8 +398,8 @@ function hasUserVoted(trackId, voterIP) {
   try {
     const stmt = db.prepare(`
       SELECT COUNT(*) as count
-      FROM track_votes
-      WHERE track_id = ? AND voter_ip = ?
+      FROM trackVotes
+      WHERE trackId = ? AND voterIp = ?
     `);
     
     const result = stmt.get(trackId, voterIP);
@@ -389,13 +426,13 @@ function hasUserVoted(trackId, voterIP) {
 function getUserTrackCount(ip) {
   try {
     const stmt = db.prepare(`
-      SELECT track_count
-      FROM user_sessions
-      WHERE ip_address = ?
+      SELECT trackCount
+      FROM userSessions
+      WHERE ipAddress = ?
     `);
     
     const result = stmt.get(ip);
-    return result ? result.track_count : 0;
+    return result ? result.trackCount : 0;
   } catch (err) {
     logger.error('Failed to get user track count', { 
       error: err.message,
@@ -414,12 +451,12 @@ function incrementUserTrackCount(ip) {
   try {
     const now = Date.now();
     const stmt = db.prepare(`
-      INSERT INTO user_sessions (ip_address, track_count, last_request, updated_at)
+      INSERT INTO userSessions (ipAddress, trackCount, lastRequest, updatedAt)
       VALUES (?, 1, ?, ?)
-      ON CONFLICT(ip_address) DO UPDATE SET
-        track_count = track_count + 1,
-        last_request = excluded.last_request,
-        updated_at = excluded.updated_at
+      ON CONFLICT(ipAddress) DO UPDATE SET
+        trackCount = trackCount + 1,
+        lastRequest = excluded.lastRequest,
+        updatedAt = excluded.updatedAt
     `);
     
     stmt.run(ip, now, now);
@@ -446,9 +483,9 @@ function incrementUserTrackCount(ip) {
 function resetUserTrackCount(ip) {
   try {
     const stmt = db.prepare(`
-      UPDATE user_sessions
-      SET track_count = 0, updated_at = ?
-      WHERE ip_address = ?
+      UPDATE userSessions
+      SET trackCount = 0, updatedAt = ?
+      WHERE ipAddress = ?
     `);
     
     const result = stmt.run(Date.now(), ip);
@@ -475,8 +512,8 @@ function resetUserTrackCount(ip) {
 function resetAllTrackCounts() {
   try {
     const stmt = db.prepare(`
-      UPDATE user_sessions
-      SET track_count = 0, updated_at = ?
+      UPDATE userSessions
+      SET trackCount = 0, updatedAt = ?
     `);
     
     const result = stmt.run(Date.now());
@@ -499,12 +536,12 @@ function setUserNickname(ip, nickname) {
   try {
     const now = Date.now();
     const stmt = db.prepare(`
-      INSERT INTO user_sessions (ip_address, track_count, nickname, last_request, updated_at)
+      INSERT INTO userSessions (ipAddress, trackCount, nickname, lastRequest, updatedAt)
       VALUES (?, 0, ?, ?, ?)
-      ON CONFLICT(ip_address) DO UPDATE SET
+      ON CONFLICT(ipAddress) DO UPDATE SET
         nickname = excluded.nickname,
-        last_request = excluded.last_request,
-        updated_at = excluded.updated_at
+        lastRequest = excluded.lastRequest,
+        updatedAt = excluded.updatedAt
     `);
     
     stmt.run(ip, nickname, now, now);
@@ -529,8 +566,8 @@ function getUserNickname(ip) {
   try {
     const stmt = db.prepare(`
       SELECT nickname
-      FROM user_sessions
-      WHERE ip_address = ?
+      FROM userSessions
+      WHERE ipAddress = ?
     `);
     
     const result = stmt.get(ip);
@@ -551,16 +588,16 @@ function getUserNickname(ip) {
 function getAllTrackCounts() {
   try {
     const stmt = db.prepare(`
-      SELECT ip_address, track_count
-      FROM user_sessions
-      WHERE track_count > 0
+      SELECT ipAddress, trackCount
+      FROM userSessions
+      WHERE trackCount > 0
     `);
     
     const results = stmt.all();
     const counts = {};
     
     for (const row of results) {
-      counts[row.ip_address] = row.track_count;
+      counts[row.ipAddress] = row.trackCount;
     }
     
     return counts;
@@ -586,7 +623,7 @@ function createAdminSession(token, expiresIn = ADMIN_SESSION_EXPIRY) {
     const expiresAt = now + (expiresIn * 1000);
     
     const stmt = db.prepare(`
-      INSERT INTO admin_sessions (token, created_at, expires_at, last_activity)
+      INSERT INTO adminSessions (token, createdAt, expiresAt, lastActivity)
       VALUES (?, ?, ?, ?)
     `);
     
@@ -618,8 +655,8 @@ function validateAdminSession(token) {
     const now = Date.now();
     
     const stmt = db.prepare(`
-      SELECT expires_at
-      FROM admin_sessions
+      SELECT expiresAt
+      FROM adminSessions
       WHERE token = ?
     `);
     
@@ -629,13 +666,13 @@ function validateAdminSession(token) {
       return false;
     }
     
-    const isValid = result.expires_at > now;
+    const isValid = result.expiresAt > now;
     
     if (isValid) {
       // Update last activity
       const updateStmt = db.prepare(`
-        UPDATE admin_sessions
-        SET last_activity = ?
+        UPDATE adminSessions
+        SET lastActivity = ?
         WHERE token = ?
       `);
       updateStmt.run(now, token);
@@ -662,7 +699,7 @@ function validateAdminSession(token) {
 function deleteAdminSession(token) {
   try {
     const stmt = db.prepare(`
-      DELETE FROM admin_sessions
+      DELETE FROM adminSessions
       WHERE token = ?
     `);
     
@@ -694,8 +731,8 @@ function cleanupExpiredSessions() {
     const now = Date.now();
     
     const stmt = db.prepare(`
-      DELETE FROM admin_sessions
-      WHERE expires_at <= ?
+      DELETE FROM adminSessions
+      WHERE expiresAt <= ?
     `);
     
     const result = stmt.run(now);
@@ -727,21 +764,21 @@ function cleanupExpiredSessions() {
 function addToPlaybackHistory(track, playedAt = Date.now()) {
   try {
     const stmt = db.prepare(`
-      INSERT INTO playback_history (track_id, spotify_uri, name, artist, added_by_ip, played_at)
+      INSERT INTO playbackHistory (trackId, spotifyUri, name, artist, addedByIp, playedAt)
       VALUES (?, ?, ?, ?, ?, ?)
     `);
     
     stmt.run(
-      track.id || track.track_id,
-      track.uri || track.spotify_uri,
+      track.id || track.trackId,
+      track.uri || track.spotifyUri,
       track.name,
       track.artist,
-      track.addedBy || track.added_by_ip || null,
+      track.addedBy || track.addedByIp || null,
       playedAt
     );
     
     logger.debug('Track added to playback history', { 
-      trackId: track.id || track.track_id,
+      trackId: track.id || track.trackId,
       trackName: track.name,
       playedAt
     });
@@ -750,7 +787,7 @@ function addToPlaybackHistory(track, playedAt = Date.now()) {
     // Playback history is used for statistics only and its absence doesn't impact core features
     logger.warn('Failed to add to playback history', { 
       error: err.message,
-      trackId: track.id || track.track_id
+      trackId: track.id || track.trackId
     });
     // Don't throw - playback history is not critical for app functionality
   }
@@ -769,12 +806,12 @@ function getTopRequestedTracks(limit = 10) {
   try {
     const stmt = db.prepare(`
       SELECT 
-        track_id,
+        trackId,
         name,
         artist,
         COUNT(*) as request_count
-      FROM playback_history
-      GROUP BY track_id
+      FROM playbackHistory
+      GROUP BY trackId
       ORDER BY request_count DESC
       LIMIT ?
     `);
@@ -795,12 +832,12 @@ function getMostActiveUsers(limit = 10) {
   try {
     const stmt = db.prepare(`
       SELECT 
-        ip_address,
-        track_count,
+        ipAddress,
+        trackCount,
         nickname
-      FROM user_sessions
-      WHERE track_count > 0
-      ORDER BY track_count DESC
+      FROM userSessions
+      WHERE trackCount > 0
+      ORDER BY trackCount DESC
       LIMIT ?
     `);
     
@@ -819,20 +856,20 @@ function getPlaybackStats() {
   try {
     const stmt = db.prepare(`
       SELECT 
-        COUNT(DISTINCT track_id) as unique_tracks,
+        COUNT(DISTINCT trackId) as unique_tracks,
         COUNT(*) as total_plays,
-        COUNT(DISTINCT added_by_ip) as unique_users
-      FROM playback_history
+        COUNT(DISTINCT addedByIp) as unique_users
+      FROM playbackHistory
     `);
     
     const queueStmt = db.prepare(`
       SELECT COUNT(*) as queue_size
-      FROM party_queue
+      FROM partyQueue
     `);
     
     const votesStmt = db.prepare(`
       SELECT COUNT(*) as total_votes
-      FROM track_votes
+      FROM trackVotes
     `);
     
     const stats = stmt.get();
