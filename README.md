@@ -152,6 +152,40 @@ With the database integration:
 - ✅ User nicknames are remembered
 - ✅ Playback history is tracked over time
 
+#### Database Schema
+
+Party Jukebox uses camelCase naming conventions for all database tables and columns, consistent with JavaScript best practices.
+
+**Tables:**
+- `partyQueue` - Tracks added by users with metadata
+- `trackVotes` - User votes per track
+- `userSessions` - User track counts and nicknames per IP
+- `playbackHistory` - Historical playback data for analytics
+- `adminSessions` - Persistent admin authentication tokens
+
+**Key Columns:**
+- `trackId` - Spotify track identifier
+- `spotifyUri` - Full Spotify URI (spotify:track:xxx)
+- `addedByIp` - IP address of user who added track
+- `voterIp` - IP address of voter
+- `ipAddress` - Primary key for user sessions
+- `trackCount` - Number of tracks added by user
+- `votedAt` - Timestamp when vote was cast (Unix milliseconds)
+- `addedAt` - Timestamp when track was added (Unix milliseconds)
+- `playedAt` - Timestamp when track was played (Unix milliseconds)
+- `albumArt` - URL to album artwork
+- `nickname` - User-defined display name
+
+**Schema Migration:**
+
+If you have an existing database with the old snake_case schema (from versions prior to this update), the application will automatically:
+1. Detect the old schema on startup
+2. Drop all old tables
+3. Recreate tables with the new camelCase naming
+4. Log a warning about the migration
+
+**Note:** This is acceptable for a party app where queue data is ephemeral and typically only lasts for the duration of an event.
+
 ### Logging
 
 Party Jukebox uses structured logging with Winston and Morgan for comprehensive monitoring and debugging.
