@@ -87,7 +87,14 @@ if [ "$SKIP_DEPS" = true ]; then
     echo "      Dependencies not updated."
 else
     echo "[3/5] Installing npm dependencies..."
-    echo "      Running: npm install --production"
+    echo "      Running: npm install --production --no-audit --no-fund"
+    
+    # Check if package.json exists
+    if [ ! -f "package.json" ]; then
+        echo "ERROR: package.json not found in $REPO_DIR."
+        echo "      Cannot install npm dependencies without package.json."
+        exit 1
+    fi
     
     # Check if npm is available
     if ! command -v npm &> /dev/null; then
@@ -96,7 +103,8 @@ else
     fi
     
     # Run npm install with --production flag to skip devDependencies
-    if npm install --production; then
+    # --no-audit and --no-fund flags prevent network calls to npm registry
+    if npm install --production --no-audit --no-fund; then
         echo "      Dependencies installed successfully."
     else
         echo "ERROR: Failed to install npm dependencies."
