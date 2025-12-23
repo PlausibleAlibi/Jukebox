@@ -14,6 +14,7 @@ A lightweight web application that allows guests on your local network to search
 - **Queue Voting**: Users can upvote songs to influence play order
 - **Track Limits**: Prevent queue flooding with per-device track limits (toggleable)
 - **Host Admin Panel**: Skip tracks, pause/play, clear queue, reset limits, and toggle track enforcement
+- **Analytics Dashboard**: Visualize party statistics, top tracks, most active users, and peak hours
 - **RFC 8252 Compliant OAuth**: Dynamic loopback port selection for desktop apps
 
 ## Quick Start
@@ -185,6 +186,40 @@ If you have an existing database with the old snake_case schema (from versions p
 4. Log a warning about the migration
 
 **Note:** This is acceptable for a party app where queue data is ephemeral and typically only lasts for the duration of an event.
+
+## Analytics Dashboard
+
+Party Jukebox includes a comprehensive analytics dashboard that visualizes your party's music trends and engagement. Access it at `/analytics.html` or via the "📊 Analytics" tab on the main page.
+
+### Features
+
+- **Real-time Statistics**: Total tracks, active users, votes cast, tracks played, and most voted track
+- **Top Requested Tracks**: Visual list showing the most popular songs with request counts
+- **User Leaderboard**: Ranked list of most active contributors with medals (🥇🥈🥉)
+- **Peak Hours Chart**: Bar chart showing when guests are most active throughout the day
+- **Auto-refresh**: Optional 30-second automatic data refresh
+- **Export Data**: Download all analytics as JSON for external analysis
+- **Filter Controls**: View top 5, 10, or 20 results
+- **Mobile Responsive**: Fully optimized for viewing on phones and tablets
+
+### Using the Dashboard
+
+1. Navigate to `http://<your-ip>:3000/analytics.html` or click "📊 Analytics" on the main page
+2. View real-time statistics and charts
+3. Use the dropdown to adjust how many top items to display (5, 10, or 20)
+4. Enable "Auto-refresh" to update data every 30 seconds
+5. Click "Export JSON" to download all analytics data
+6. Your preferences (auto-refresh and filter settings) are saved in localStorage
+
+### Analytics Data
+
+All analytics are calculated from persistent database records:
+- Party queue submissions (current and historical)
+- Vote activity across all tracks
+- User session data (track counts, nicknames per IP)
+- Playback history
+
+Data persists across server restarts, giving you a complete picture of your party's activity over time.
 
 ### Logging
 
@@ -861,6 +896,7 @@ sudo iptables -A INPUT -p tcp --dport 3000 -j DROP
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/` | GET | Main web interface |
+| `/analytics.html` | GET | Analytics dashboard |
 | `/login` | GET | Initiates Spotify OAuth |
 | `/callback` | GET | OAuth callback handler |
 | `/api/status` | GET | Check authentication status |
