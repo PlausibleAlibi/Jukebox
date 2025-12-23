@@ -552,7 +552,7 @@ The `scripts/` directory contains utility scripts for managing the application:
 |--------|-------------|
 | `docker-start.sh` | Build and start the Docker container with all volume mounts (.env, certs, logs, data) |
 | `docker-stop.sh` | Stop and remove the Docker container (logs and data are preserved) |
-| `update_and_restart.sh` | Pull latest code from git and restart the systemd service |
+| `update_and_restart.sh` | Pull latest code from git, install dependencies, and restart the systemd service |
 | `tag-release.sh` | Interactive tool for creating version tags with semantic versioning |
 
 ### Using the Scripts
@@ -668,13 +668,19 @@ A Bash script is provided to automate pulling the latest code and restarting the
 ```bash
 # Run the script (requires sudo for service restart)
 sudo ./scripts/update_and_restart.sh
+
+# Skip dependency installation if no new dependencies were added
+sudo ./scripts/update_and_restart.sh --skip-deps
 ```
 
 #### What the Script Does
 
 1. **Pulls latest code** from the remote Git repository
-2. **Updates `LAST_UPDATED.txt`** with the current timestamp (UTC)
-3. **Restarts the jukebox systemd service**
+2. **Installs npm dependencies** (production only, skipping devDependencies and audit reports - can be skipped with `--skip-deps`)
+3. **Updates `LAST_UPDATED.txt`** with the current timestamp (UTC)
+4. **Restarts the jukebox systemd service**
+
+> **Note:** The script uses `--no-audit` to speed up installation. Run `npm audit` separately to check for security vulnerabilities.
 
 #### Configuration
 
@@ -685,9 +691,16 @@ Edit the variables at the top of `scripts/update_and_restart.sh` to customize:
 | `REPO_DIR` | Path to the jukebox repository | `/opt/jukebox` |
 | `SERVICE_NAME` | Name of the systemd service | `jukebox` |
 
+#### Options
+
+| Flag | Description |
+|------|-------------|
+| `--skip-deps` | Skip npm dependency installation (use when dependencies haven't changed) |
+
 #### Requirements
 
 - **Git** must be installed and configured
+- **Node.js and npm** must be installed (for dependency installation)
 - **systemd** service must be set up (see `deploy/jukebox.service`)
 - Script must be run with sufficient permissions to restart the service (typically via `sudo`)
 
