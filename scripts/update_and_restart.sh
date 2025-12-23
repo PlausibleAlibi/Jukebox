@@ -103,13 +103,13 @@ else
     fi
     
     # Run npm install with --production flag to skip devDependencies
-    # --no-audit and --no-fund flags prevent unnecessary audit and funding network calls
+    # --no-audit and --no-fund flags prevent audit warnings and funding messages from being displayed
     if npm install --production --no-audit --no-fund; then
         echo "      Dependencies installed successfully."
     else
         echo "ERROR: Failed to install npm dependencies."
         echo "      This may cause the service to fail if new dependencies were added."
-        echo "      Please check npm logs and try running 'npm install --production --no-audit --no-fund' manually."
+        echo "      Please check the npm error output above and try running 'npm install --production --no-audit --no-fund' manually."
         exit 1
     fi
 fi
