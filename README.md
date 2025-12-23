@@ -676,9 +676,11 @@ sudo ./scripts/update_and_restart.sh --skip-deps
 #### What the Script Does
 
 1. **Pulls latest code** from the remote Git repository
-2. **Installs npm dependencies** (production only, can be skipped with `--skip-deps`)
+2. **Installs npm dependencies** (production only, skipping devDependencies and audit reports - can be skipped with `--skip-deps`)
 3. **Updates `LAST_UPDATED.txt`** with the current timestamp (UTC)
 4. **Restarts the jukebox systemd service**
+
+> **Note:** The script uses `--no-audit` to speed up installation. Run `npm audit` separately to check for security vulnerabilities.
 
 #### Configuration
 

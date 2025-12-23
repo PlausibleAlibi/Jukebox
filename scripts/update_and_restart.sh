@@ -103,7 +103,8 @@ else
     fi
     
     # Run npm install with --production flag to skip devDependencies
-    # --no-audit and --no-fund flags prevent audit warnings and funding messages from being shown in the output
+    # --no-audit and --no-fund flags suppress audit reports and funding messages in output
+    # Note: Security audits should be run separately in CI/CD pipelines
     if npm install --production --no-audit --no-fund; then
         echo "      Dependencies installed successfully."
     else
