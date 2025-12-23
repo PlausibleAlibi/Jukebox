@@ -346,7 +346,7 @@
         return `
           <div class="track-item">
             <div class="leaderboard-rank">#${index + 1}</div>
-            <img class="track-art" src="${track.albumArt || 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect fill=%22%23333%22 width=%22100%22 height=%22100%22/><text x=%2250%22 y=%2255%22 text-anchor=%22middle%22 fill=%22%23666%22 font-size=%2240%22>♪</text></svg>'}" alt="${escapeHtml(track.name)}" loading="lazy">
+            <img class="track-art" src="${track.albumArt || FALLBACK_ALBUM_ART}" alt="${escapeHtml(track.name)}" loading="lazy">
             <div class="track-info">
               <div class="track-name">${escapeHtml(track.name)}</div>
               <div class="track-artist">${escapeHtml(track.artist)}</div>
@@ -387,6 +387,16 @@
       `;
     }
 
+    // Constants
+    const FALLBACK_ALBUM_ART = 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect fill=%22%23333%22 width=%22100%22 height=%22100%22/><text x=%2250%22 y=%2255%22 text-anchor=%22middle%22 fill=%22%23666%22 font-size=%2240%22>♪</text></svg>';
+
+    // Shared utility function for hour formatting
+    function formatHour(hour) {
+      const displayHour = hour % 12 || 12;
+      const ampm = hour < 12 ? 'AM' : 'PM';
+      return `${displayHour}${ampm}`;
+    }
+
     function renderPeakHours(hourlyStats) {
       if (!hourlyStats || hourlyStats.length === 0) {
         document.getElementById('peakHoursContainer').innerHTML = '<div class="empty-state">No usage data available yet</div>';
@@ -408,11 +418,7 @@
         }
       });
 
-      const labels = Array.from({length: 24}, (_, i) => {
-        const hour = i % 12 || 12;
-        const ampm = i < 12 ? 'AM' : 'PM';
-        return `${hour}${ampm}`;
-      });
+      const labels = Array.from({length: 24}, (_, i) => formatHour(i));
 
       // Destroy existing chart if it exists
       if (charts.peakHours) {
@@ -495,7 +501,7 @@
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(40px, 1fr)); gap: 8px; padding: 20px;">
           ${hourCounts.map((count, hour) => {
             const height = (count / maxCount * 200);
-            const hourLabel = (hour % 12 || 12) + (hour < 12 ? 'AM' : 'PM');
+            const hourLabel = formatHour(hour);
             return `
               <div style="display: flex; flex-direction: column; align-items: center; gap: 4px;">
                 <div style="font-size: 0.7rem; color: rgba(255, 215, 0, 0.8);">${count}</div>
@@ -526,6 +532,7 @@
     }
 
     function exportData() {
+      const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
       const exportData = {
         timestamp: new Date().toISOString(),
         stats: allData.stats,
@@ -539,7 +546,7 @@
       const url = URL.createObjectURL(dataBlob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `jukebox-analytics-${Date.now()}.json`;
+      link.download = `jukebox-analytics-${timestamp}.json`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
