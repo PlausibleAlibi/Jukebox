@@ -3,21 +3,21 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <meta name="theme-color" content="#1a1a2e">
+  <meta name="theme-color" content="#0e1b3d">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>Analytics</title>
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
-    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,Ubuntu,sans-serif;background:linear-gradient(135deg,#0a0a0a 0%,#1a1a1a 50%,#2a2520 100%);min-height:100vh;color:#fff;-webkit-font-smoothing:antialiased}
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,Ubuntu,sans-serif;background:linear-gradient(135deg,#0a0f1f 0%,#0e1b3d 50%,#1b2a4a 100%);min-height:100vh;color:#fff;-webkit-font-smoothing:antialiased}
     .container{max-width:1200px;margin:0 auto;padding:16px;padding-bottom:80px}
-    header{text-align:center;padding:16px 0;border-bottom:1px solid rgba(255,215,0,0.2);margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px}
+    header{text-align:center;padding:16px 0;border-bottom:1px solid rgba(192,192,192,0.2);margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px}
     .header-title{flex:1;text-align:center}
     h1{font-size:1.75rem;margin-bottom:4px}
-    h1 span{color:#FFD700}
+    h1 span{color:#C0C0C0}
     .subtitle{color:rgba(255,255,255,0.6);font-size:0.85rem}
-    .btn{background:#FFD700;color:#000;border:none;padding:8px 16px;border-radius:20px;cursor:pointer;font-size:0.85rem;font-weight:600;text-decoration:none;display:inline-flex;align-items:center;gap:6px;transition:background 0.2s}
-    .btn:hover{background:#FFC700}
+    .btn{background:#C0C0C0;color:#000;border:none;padding:8px 16px;border-radius:20px;cursor:pointer;font-size:0.85rem;font-weight:600;text-decoration:none;display:inline-flex;align-items:center;gap:6px;transition:background 0.2s}
+    .btn:hover{background:#D0D0D0}
     .btn-secondary{background:rgba(255,255,255,0.1);color:#fff}
     .btn-secondary:hover{background:rgba(255,255,255,0.2)}
     .btn:disabled{background:rgba(255,255,255,0.2);cursor:not-allowed;color:rgba(255,255,255,0.5)}
@@ -26,38 +26,38 @@
     .controls-left{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
     .controls-right{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
     .last-updated{color:rgba(255,255,255,0.6);font-size:0.75rem}
-    .filter-select{background:rgba(255,255,255,0.1);color:#fff;border:1px solid rgba(255,215,0,0.3);padding:6px 12px;border-radius:16px;cursor:pointer;font-size:0.85rem;outline:none}
-    .filter-select:focus{border-color:#FFD700}
+    .filter-select{background:rgba(255,255,255,0.1);color:#fff;border:1px solid rgba(192,192,192,0.3);padding:6px 12px;border-radius:16px;cursor:pointer;font-size:0.85rem;outline:none}
+    .filter-select:focus{border-color:#4DA3FF}
     .stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:24px}
-    .stat-card{background:rgba(255,255,255,0.05);border:1px solid rgba(255,215,0,0.2);border-radius:12px;padding:16px;text-align:center}
-    .stat-value{font-size:2rem;font-weight:bold;color:#FFD700;margin-bottom:4px}
+    .stat-card{background:rgba(255,255,255,0.05);border:1px solid rgba(192,192,192,0.2);border-radius:12px;padding:16px;text-align:center}
+    .stat-value{font-size:2rem;font-weight:bold;color:#C0C0C0;margin-bottom:4px}
     .stat-label{font-size:0.85rem;color:rgba(255,255,255,0.7)}
     .stat-sublabel{font-size:0.75rem;color:rgba(255,255,255,0.5);margin-top:4px}
-    .chart-section{background:rgba(255,255,255,0.05);border:1px solid rgba(255,215,0,0.2);border-radius:12px;padding:20px;margin-bottom:24px}
+    .chart-section{background:rgba(255,255,255,0.05);border:1px solid rgba(192,192,192,0.2);border-radius:12px;padding:20px;margin-bottom:24px}
     .chart-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px}
     .chart-title{font-size:1.25rem;font-weight:600;display:flex;align-items:center;gap:8px}
     .chart-container{position:relative;height:300px}
     .leaderboard{list-style:none}
     .leaderboard-item{display:flex;align-items:center;justify-content:space-between;padding:12px;background:rgba(255,255,255,0.05);border-radius:8px;margin-bottom:8px;transition:background 0.2s}
     .leaderboard-item:hover{background:rgba(255,255,255,0.1)}
-    .leaderboard-rank{font-size:1.25rem;font-weight:bold;color:#FFD700;width:40px;text-align:center}
+    .leaderboard-rank{font-size:1.25rem;font-weight:bold;color:#C0C0C0;width:40px;text-align:center}
     .leaderboard-info{flex:1;margin:0 12px}
     .leaderboard-name{font-weight:600;font-size:0.95rem}
     .leaderboard-nickname{color:rgba(255,255,255,0.5);font-size:0.75rem}
-    .leaderboard-value{font-size:1rem;font-weight:600;color:#FFD700}
+    .leaderboard-value{font-size:1rem;font-weight:600;color:#C0C0C0}
     .track-item{display:flex;align-items:center;gap:12px;padding:12px;background:rgba(255,255,255,0.05);border-radius:8px;margin-bottom:8px;transition:background 0.2s}
     .track-item:hover{background:rgba(255,255,255,0.1)}
     .track-art{width:48px;height:48px;border-radius:4px;object-fit:cover;flex-shrink:0}
     .track-info{flex:1;min-width:0}
     .track-name{font-weight:600;font-size:0.95rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .track-artist{color:rgba(255,255,255,0.7);font-size:0.85rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    .track-count{font-size:1rem;font-weight:600;color:#FFD700;display:flex;align-items:center;gap:4px}
+    .track-count{font-size:1rem;font-weight:600;color:#C0C0C0;display:flex;align-items:center;gap:4px}
     .loading{text-align:center;padding:40px;color:rgba(255,255,255,0.6)}
-    .loading-spinner{display:inline-block;width:32px;height:32px;border:3px solid rgba(255,215,0,0.2);border-top-color:#FFD700;border-radius:50%;animation:spin 1s linear infinite}
+    .loading-spinner{display:inline-block;width:32px;height:32px;border:3px solid rgba(192,192,192,0.2);border-top-color:#C0C0C0;border-radius:50%;animation:spin 1s linear infinite}
     @keyframes spin{to{transform:rotate(360deg)}}
     .error-message{background:rgba(255,68,68,0.1);border:1px solid rgba(255,68,68,0.3);color:#ff6b6b;padding:16px;border-radius:8px;margin-bottom:16px;text-align:center}
     .empty-state{text-align:center;padding:40px;color:rgba(255,255,255,0.5)}
-    .footer{text-align:center;padding:32px 16px 16px 16px;color:rgba(255,255,255,0.4);font-size:0.8rem;border-top:1px solid rgba(255,215,0,0.1);margin-top:32px}
+    .footer{text-align:center;padding:32px 16px 16px 16px;color:rgba(255,255,255,0.4);font-size:0.8rem;border-top:1px solid rgba(192,192,192,0.1);margin-top:32px}
     .checkbox-container{display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none}
     .checkbox-container input[type="checkbox"]{cursor:pointer;width:16px;height:16px}
     @media(max-width:768px){
@@ -468,7 +468,7 @@
             },
             tooltip: {
               backgroundColor: 'rgba(26, 26, 46, 0.9)',
-              titleColor: '#FFD700',
+              titleColor: '#C0C0C0',
               bodyColor: '#fff',
               borderColor: 'rgba(255, 215, 0, 0.3)',
               borderWidth: 1,
