@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#1a1a2e">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <title>Analytics - Brooklyn's JukeBox</title>
+  <title>Analytics</title>
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
     body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,Ubuntu,sans-serif;background:linear-gradient(135deg,#0a0a0a 0%,#1a1a1a 50%,#2a2520 100%);min-height:100vh;color:#fff;-webkit-font-smoothing:antialiased}
@@ -74,8 +74,8 @@
     <header>
       <a href="/" class="back-link btn btn-secondary">← Back</a>
       <div class="header-title">
-        <h1>📊 Analytics <span>Dashboard</span></h1>
-        <p class="subtitle">Party music trends and insights</p>
+        <h1>📊 <span id="analyticsAppTitle">JukeBox</span> <span>Analytics</span></h1>
+        <p class="subtitle" id="analyticsSubtitle">Party music trends and insights</p>
       </div>
       <div style="width:80px"></div>
     </header>
@@ -172,10 +172,30 @@
     const topTracksContainer = document.getElementById('topTracksContainer');
     const topUsersContainer = document.getElementById('topUsersContainer');
     const peakHoursChart = document.getElementById('peakHoursChart');
+    const analyticsAppTitle = document.getElementById('analyticsAppTitle');
+    const analyticsSubtitle = document.getElementById('analyticsSubtitle');
+
+    async function loadConfig() {
+      try {
+        const res = await fetch('/api/config');
+        const cfg = await res.json();
+        if (cfg && cfg.appTitle) {
+          document.title = 'Analytics - ' + cfg.appTitle;
+          if (analyticsAppTitle) analyticsAppTitle.textContent = cfg.appTitle;
+        }
+        if (cfg && cfg.appByline && analyticsSubtitle) {
+          analyticsSubtitle.textContent = cfg.appByline;
+        }
+      } catch (e) {
+        // non-fatal; keep defaults
+        console.warn('Failed to load config for analytics:', e);
+      }
+    }
 
     // Initialize
     limitFilter.value = currentLimit;
     autoRefreshToggle.checked = autoRefreshEnabled;
+    await loadConfig();
     loadAllData();
 
     // Setup auto-refresh if enabled

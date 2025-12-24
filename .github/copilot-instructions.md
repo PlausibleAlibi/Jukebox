@@ -13,10 +13,12 @@ Party Jukebox is a Node.js/Express web application that provides a collaborative
 - QR code generation for easy mobile access
 - HTTPS/SSL support for secure connections
 - Structured logging with Winston and Morgan
+- SQLite database for persistent queue state and analytics
 
 ## Technology Stack
 
 - **Backend**: Node.js (>=18.0.0) with Express 5.x
+- **Database**: SQLite with better-sqlite3 (WAL mode)
 - **Frontend**: Vanilla HTML/CSS/JavaScript (no framework)
 - **API**: Spotify Web API (OAuth 2.0)
 - **Logging**: Winston (structured JSON logs) + Morgan (HTTP request logging)
@@ -28,11 +30,17 @@ Party Jukebox is a Node.js/Express web application that provides a collaborative
 ```
 /
 ├── server.js              # Main Express server and API endpoints
+├── database.js            # SQLite database layer (camelCase schema)
+├── database.test.js       # Database unit tests
+├── server.test.js         # Server integration tests
 ├── logger.js              # Winston/Morgan logging configuration
 ├── package.json           # Dependencies and scripts
 ├── .env.example           # Environment variable template
+├── data/                  # SQLite database files (auto-created)
+│   └── jukebox.db         # Main database file
 ├── public/
-│   └── index.html         # Single-page web interface
+│   ├── index.html         # Single-page web interface
+│   └── analytics.html     # Analytics dashboard
 ├── scripts/               # Utility scripts
 │   ├── docker-start.sh    # Start Docker container
 │   ├── docker-stop.sh     # Stop Docker container
@@ -63,7 +71,7 @@ cp .env.example .env
 # Run the server
 npm start
 
-# Run tests
+# Run tests (server and database)
 npm test
 ```
 
@@ -84,6 +92,50 @@ Optional:
 - `SSL_PORT` (default: 443) / `SSL_HOST` (default: 0.0.0.0) - HTTPS config
 - `LOG_LEVEL` (default: info) - Logging verbosity
 - `SPOTIFY_REDIRECT_URI` - Static OAuth redirect (optional, for server deployments)
+- `DATABASE_PATH` (default: ./data/jukebox.db) - SQLite database location
+- `ADMIN_SESSION_EXPIRY` (default: 86400) - Admin session expiry in seconds
+
+## Architecture: Key Patterns
+
+### Database Layer (database.js)
+The app uses SQLite with **camelCase naming** (migrated from snake_case). The database provides:
+- **Synchronous operations** via better-sqlite3 (simpler error handling)
+- **WAL mode** for better concurrency (separate read/write operations)
+- **Automatic schema migration** from old snake_case tables on first run
+- **UNIQUE constraints** prevent duplicate tracks from same user: `UNIQUE(trackId, addedByIp)`
+
+Key database patterns:
+```javascript
+// Database operations are synchronous - no async/await needed
+db.addToPartyQueue(track);  // Returns boolean, throws on error
+const queue = db.getPartyQueue();  // Always returns array
+
+// All DB operations auto-log via logger module
+// Database handles cleanup on server shutdown
+```
+
+Tables use camelCase: `partyQueue`, `trackVotes`, `userSessions`, `playbackHistory`, `adminSessions`
+
+### Caching Strategy (server.js)
+Critical caches reduce Spotify API load:
+- **playbackCache**: Current playback state, 15s TTL (avoids rate limits)
+- **spotifyQueueCache**: Spotify's actual queue, 15s TTL (expensive API call)
+- **tokenData**: In-memory OAuth tokens (access/refresh, expiry tracking)
+
+Tokens auto-refresh when `tokenData.expiresAt - Date.now() < TOKEN_REFRESH_BUFFER_MS` (5 min buffer)
+
+### IP-Based User Identity
+No user accounts - identity tracked via `getClientIP(req)`:
+```javascript
+// Respects X-Forwarded-For (proxy-aware), falls back to socket
+const clientIP = getClientIP(req);
+```
+Used for: track limits (`userSessions`), voting, analytics, admin sessions
+
+### Spotify API Integration
+- **spotifyFetch()**: Wrapper with retry logic (exponential backoff), timeout (10s), status-based retries (429, 5xx)
+- **parseSpotifyErrorResponse()**: Handles non-JSON error responses from Spotify
+- Always await refreshAccessToken() before critical operations
 
 ## Code Style and Conventions
 
@@ -131,16 +183,19 @@ Optional:
 ## Testing
 
 - **Framework**: Node.js built-in test runner (`node --test`)
-- **Test File**: `server.test.js`
-- **Run Tests**: `npm test`
-- **Test Environment**: Uses PORT 3001, mocked Spotify credentials
+- **Test Files**: `server.test.js` (integration), `database.test.js` (unit)
+- **Run Tests**: `npm test` (runs both test files)
+- **Test Environment**: 
+  - Server tests use PORT 3001, mocked Spotify credentials
+  - Database tests use `./data/test-jukebox.db` (auto-cleaned)
 - **Patterns**: 
   - Use `describe()` for test suites
   - Use `it()` for individual test cases
   - Use `before()`/`after()` for setup/teardown
-  - Use `makeRequest()` helper for HTTP requests
+  - Use `makeRequest()` helper for HTTP requests (server.test.js)
 - **Important**: Ensure existing tests pass before submitting changes
 - Write integration tests for new API endpoints
+- Database tests verify camelCase schema and UNIQUE constraints
 
 ## Common Development Tasks
 
